@@ -395,9 +395,9 @@ FDirectLighting ClearCoatBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L, 
 	
 		if( AreaLight.bIsRect )
 		{
-			float3 DefaultSpecular = RectGGXApproxLTC(GBuffer.Roughness, RetroreflectionColor, N, -V, AreaLight.Rect, AreaLight.Texture);
-			float3 RefractedSpecular = RectGGXApproxLTC(GBuffer.Roughness, GBuffer.SpecularColor, N, V, AreaLight.Rect, AreaLight.Texture);
-			Lighting.Specular = lerp(DefaultSpecular, RefractedSpecular, ClearCoat);
+			float3 DefaultSpecular = RectGGXApproxLTC(GBuffer.Roughness, GBuffer.SpecularColor, N, V, AreaLight.Rect, AreaLight.Texture);
+			float3 RetroRectSpecular = RectGGXApproxLTC(GBuffer.Roughness, RetroreflectionColor, N, -V, AreaLight.Rect, AreaLight.Texture);
+			Lighting.Specular = lerp(DefaultSpecular, RetroRectSpecular, ClearCoat);
 		}
 		else
 		{
