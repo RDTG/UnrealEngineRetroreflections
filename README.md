@@ -38,3 +38,7 @@ The "Retroreflection Mask" output is where you plug in your mask, so you can mas
 
 **NOTE:**
 The patch/shading model versions are very early work still, and very messy. They also add 2 extra shading models for alternative diffuse shading methods. You can tweak these yourself, but they will be removed in the next version, if there is a next version as a custom shading model. I am currently looking into a plugin + drop in shader solution that would allow you to place a single output expression in your material graph to add the functionality. 
+
+**Credits:**
+William Schilthuis for the original UE4 retroreflective shading model I used as the base for this.
+https://williamgs.com/posts/unreal-retro-reflective-shading-model/
