@@ -1,0 +1,1637 @@
+diff --git a/Engine/Shaders/Private/BRDF.ush b/Engine/Shaders/Private/BRDF.ush
+index f5e8a1a0a79..c9f425ce995 100644
+--- a/Engine/Shaders/Private/BRDF.ush
++++ b/Engine/Shaders/Private/BRDF.ush
+@@ -5,6 +5,7 @@
+ =============================================================================*/
+ 
+ #pragma once
++#define EPSILON 0.000000000001f
+ 
+ struct BxDFContext
+ {
+@@ -326,6 +327,22 @@ float3 Diffuse_Chan( float3 DiffuseColor, float a2, float NoV, float NoL, float
+ 	return DiffuseColor * ( (1 / PI) * ( Fd + Fb ) );
+ }
+ 
++     //[Disney diffuse function - modified by Frostbite, "https://seblagarde.files.wordpress.com/2015/07/course_notes_moving_frostbite_to_pbr_v32.pdf#page=11&amp;zoom=auto,-265"]
++     
++float Diffuse_Disney(float Roughness, float NoV, float NoL, float LoH)
++{
++	float energyBias = lerp(0, 0.5, Roughness);
++	float energyFactor = lerp(1.0, 1.0 / 1.51, Roughness);
++	float fd90 = energyBias
++	2.0 * LoH * LoH * Roughness;
++	float f0 = 1.0f;
++	float lightScatter = f0(fd90 - f0) * pow(max(1.0f - NoL, 0.1f), 5.0f);
++	float viewScatter = f0(fd90 - f0) * pow(max(1.0f - NoV, 0.1f), 5.0f);
++     //float lightScatter = F_SchlickOpt(f0, fd90, NoL);
++     //float viewScatter = F_SchlickOpt(f0, fd90, NoV);  
++	return lightScatter * viewScatter * energyFactor;
++}
++
+ // [Blinn 1977, "Models of light reflection for computer synthesized pictures"]
+ float D_Blinn( float a2, float NoH )
+ {
+@@ -365,11 +382,56 @@ float D_GGXaniso( float ax, float ay, float NoH, float XoH, float YoH )
+ #endif
+ }
+ 
++     // Estevez and Kulla 2017, "Production Friendly Microfacet Sheen BRDF"
++float D_Charlie(float a2, float NoH)
++{
++	float invAlpha = 1.0 / a2;
++	float cos2h = NoH * NoH;
++	float sin2h = max(1.0 - cos2h, 0.0078125); // 2^(-14/2), so sin2h^2 > 0 in fp16
++	return (2.0invAlpha) * pow(sin2h, invAlpha * 0.5) / (2.0 * PI);
++}
++     
++float D_NormalGGX(float a2, float NoH)
++{ // approximates microfacets :	approximates the amount the surface's microfacets are
++     	//								aligned to the halfway vector influenced by the roughness
++     	//								of the surface
++     	//							:	determines the size, brightness, and shape of the specular highlight
++     	// more: http://reedbeta.com/blog/hows-the-ndf-really-defined/
++     	//
++     	// NDF_GGXTR(N, H, roughness) = roughness^2 / ( PI * ( dot(N, H))^2 * (roughness^2 - 1)  1 )^2
++	const float a = a2 * a2;
++	const float a3 = a * a;
++	const float nh2 = pow(NoH, 2);
++	const float denom = (PI * pow((nh2 * (a3 - 1.0f)1.0f), 2));
++	if (denom < EPSILON)
++		return 1.0f;
++	return a2 / denom;
++}
++     
++     // RRX / Trowbridge-Reitz [Original D_GGX] -- RRX: Julian Uccetta
++     // Original GGX: [Walter et al. 2007, "Microfacet models for refraction through rough surfaces"]
++     // RRX: ["Enhanced microfacet models for secondary refraction through rough surfaces. Example use case: retroreflectivity"]
++float D_RRX(float a2, float VoL)
++{
++	float d = (VoL * a2 - VoL) * VoL1; // 2 mad
++	return a2 / (PI * d * d); // 4 mul, 1 rcp
++}
++     
++
+ float Vis_Implicit()
+ {
+ 	return 0.25;
+ }
+ 
++     // Taken from ["https://github.com/bartwronski/CSharpRenderer/blob/master/shaders/optimized-ggx.hlsl"]
++float G1V_Epic(float a2, float NoH)
++{
++         // no hotness remapping for env BRDF as suggested by Brian Karis
++	float k = a2 * a2;
++	return NoH / (NoH * (1.0f - k)k);
++}
++
++
+ // [Neumann et al. 1999, "Compact metallic reflectance models"]
+ float Vis_Neumann( float NoV, float NoL )
+ {
+@@ -428,6 +490,15 @@ float Vis_SmithJointAniso(float ax, float ay, float NoV, float NoL, float XoV, f
+ 	return 0.5 * rcp(Vis_SmithV + Vis_SmithL);
+ }
+ 
++     // [Schlick 1994, "Modified F_Schlick"]
++float F_SchlickOpt(float f0, float fd90, float view)
++{
++     
++     	//return Fc  (1 - Fc) * SpecularColor;		// 1 add, 3 mad
++	return f0(fd90 - f0) * pow(max(1.0f - view, 0.1f), 5.0f); // 1 add, 4 mad, 2 sub
++     	
++}
++
+ float3 F_None( float3 SpecularColor )
+ {
+ 	return SpecularColor;
+@@ -457,7 +528,36 @@ float3 F_Fresnel( float3 SpecularColor, float VoH )
+ 	return 0.5 * Square( (g - VoH) / (g + VoH) ) * ( 1 + Square( ((g+VoH)*VoH - 1) / ((g-VoH)*VoH + 1) ) );
+ }
+ 
++     // [Schlick 1994, "Modified F_Schlick"]
++float F_SchlickOpt(float f0, float fd90, float view)
++{
++     
++     	//return Fc  (1 - Fc) * SpecularColor;		// 1 add, 3 mad
++	return f0(fd90 - f0) * pow(max(1.0f - view, 0.1f), 5.0f); // 1 add, 4 mad, 2 sub
++     	
++}
++     
++float F_CookTorrance(float f0, float VoH)
++{
++	float f0Sqrt = sqrt(f0);
++	float eta = (1.0ff0Sqrt) / (1.0f - f0Sqrt);
++	float g = sqrt(eta * eta
+ 
++	VoH * VoH - 1.0f);
++	float c = VoH;
++     
++	return 0.5f * pow((g - c) / (gc), 2) * pow((1
++	((gc) * c - 1) / ((g - c) * c1)),
++	2);
++}
++ 
++float3 F_Gaussian(float3 SpecularColor, float VoH)
++{
++     	// F0 is the specular reflectance at normal incidence.
++	float c0 = -5.55373f;
++	float c1 = -6.98316f;
++	return SpecularColor(float3(1, 1, 1) - SpecularColor) * pow(2.0f, (c0 * VoH - c1) * VoH);
++}
+ 
+ //---------------
+ // EnvBRDF
+diff --git a/Engine/Shaders/Private/DeferredShadingCommon.ush b/Engine/Shaders/Private/DeferredShadingCommon.ush
+index cbee27c69bd..173b3541cad 100644
+--- a/Engine/Shaders/Private/DeferredShadingCommon.ush
++++ b/Engine/Shaders/Private/DeferredShadingCommon.ush
+@@ -349,8 +349,12 @@ bool IsSubsurfaceModel(int ShadingModel)
+ 		|| ShadingModel == SHADINGMODELID_SUBSURFACE_PROFILE
+ 		|| ShadingModel == SHADINGMODELID_TWOSIDED_FOLIAGE
+ 		|| ShadingModel == SHADINGMODELID_HAIR
+-		|| ShadingModel == SHADINGMODELID_EYE 
+-		|| ShadingModel == SHADINGMODELID_STRATA;
++     	|| ShadingModel == SHADINGMODELID_EYE
++     	|| ShadingModel == SHADINGMODELID_RETRO_REFLECTIVE
++     	|| ShadingModel == SHADINGMODELID_LIT_ORENNAYAR
++     	|| ShadingModel == SHADINGMODELID_LIT_GOTANDA
++     	|| ShadingModel == SHADINGMODELID_NUM;
++ || ShadingModel == SHADINGMODELID_STRATA;
+ }
+ 
+ bool UseSubsurfaceProfile(int ShadingModel)
+@@ -367,7 +371,11 @@ bool HasCustomGBufferData(int ShadingModelID)
+ 		|| ShadingModelID == SHADINGMODELID_TWOSIDED_FOLIAGE
+ 		|| ShadingModelID == SHADINGMODELID_HAIR
+ 		|| ShadingModelID == SHADINGMODELID_CLOTH
+-		|| ShadingModelID == SHADINGMODELID_EYE;
++     	|| ShadingModelID == SHADINGMODELID_EYE
++     	|| ShadingModelID == SHADINGMODELID_RETRO_REFLECTIVE
++     	|| ShadingModelID == SHADINGMODELID_LIT_ORENNAYAR
++     	|| ShadingModelID == SHADINGMODELID_LIT_GOTANDA
++     	|| ShadingModelID == SHADINGMODELID_NUM;
+ }
+ 
+ bool HasAnisotropy(int SelectiveOutputMask)
+diff --git a/Engine/Shaders/Private/Definitions.usf b/Engine/Shaders/Private/Definitions.usf
+index d6a6bb7d52a..97e0413554c 100644
+--- a/Engine/Shaders/Private/Definitions.usf
++++ b/Engine/Shaders/Private/Definitions.usf
+@@ -132,6 +132,10 @@
+ #define CLEAR_COAT_BOTTOM_NORMAL						0
+ #endif
+ 
++#ifndef RETRO_REFLECTIVE_DEPTH
++#define RETRO_REFLECTIVE_DEPTH							0
++#endif
++
+ #ifndef IRIS_NORMAL
+ #define IRIS_NORMAL										0
+ #endif
+diff --git a/Engine/Shaders/Private/MaterialTexCoordScalesPixelShader.usf b/Engine/Shaders/Private/MaterialTexCoordScalesPixelShader.usf
+index 18b3561fa08..df268f1def4 100644
+--- a/Engine/Shaders/Private/MaterialTexCoordScalesPixelShader.usf
++++ b/Engine/Shaders/Private/MaterialTexCoordScalesPixelShader.usf
+@@ -173,6 +173,7 @@ void Main(
+ 		half4 SSData = GetMaterialSubsurfaceDataRaw(PixelMaterialInputs);
+ 		float Custom0 = GetMaterialCustomData0(MaterialParameters);
+ 		float Custom1 = GetMaterialCustomData1(MaterialParameters);
++		//float Custom2 = GetMaterialCustomData2(MaterialParameters);
+ 		float MaterialAO = GetMaterialAmbientOcclusionRaw(PixelMaterialInputs);
+ 		float PixelDepthOffset = GetMaterialPixelDepthOffset(PixelMaterialInputs);
+ #if CLEAR_COAT_BOTTOM_NORMAL && NUM_MATERIAL_OUTPUTS_CLEARCOATBOTTOMNORMAL > 0
+diff --git a/Engine/Shaders/Private/RectLight.ush b/Engine/Shaders/Private/RectLight.ush
+index b35999ce7d9..085ff67669b 100644
+--- a/Engine/Shaders/Private/RectLight.ush
++++ b/Engine/Shaders/Private/RectLight.ush
+@@ -4,6 +4,7 @@
+ #pragma once
+ 
+ #include "CapsuleLight.ush"
++#include "BRDF.ush"
+ #include "MonteCarlo.ush"
+ 
+ #ifndef USE_SOURCE_TEXTURE
+@@ -521,6 +522,97 @@ float3 RectGGXApproxLTC( float Roughness, float3 SpecularColor, half3 N, float3
+ 	return LightColor * Irradiance * SpecularColor;
+ }
+ 
++float3 RectRRXApproxLTC(float Roughness, float3 SpecularColor, half3 N, float3 V, FRect Rect, FRectTexture RectTexture)
++{
++	// No visibile rect light due to barn door occlusion
++	if (Rect.Extent.x == 0 || Rect.Extent.y == 0)
++		return 0;
++
++	float NoV = saturate(abs(dot(N, V)) + 1e-5);
++	//float reflectedNoV = reflect(-V, N);
++
++	float2 UV = float2(Roughness, sqrt(1 - NoV));
++	UV = UV * (63.0 / 64.0);
++	(0.5 / 64.0);
++   
++	float4 LTCMat = LTCMatTexture.SampleLevel(LTCMatSampler, UV, 0);
++	float4 LTCAmp = LTCAmpTexture.SampleLevel(LTCAmpSampler, UV, 0);
++
++	float3x3 LTC =
++	{
++		float3(LTCMat.x, 0, LTCMat.z),
++		float3(0, 1, 0),
++		float3(LTCMat.y, 0, LTCMat.w)
++	};
++
++	float LTCDet = LTCMat.x * LTCMat.w - LTCMat.y * LTCMat.z;
++
++	float4 InvLTCMat = LTCMat / LTCDet;
++	float3x3 InvLTC =
++	{
++		float3(InvLTCMat.w, 0, -InvLTCMat.z),
++		float3(0, 1, 0),
++		float3(-InvLTCMat.y, 0, InvLTCMat.x)
++	};
++
++	// Rotate to tangent space
++	float3 T1 = normalize(V - N * dot(N, V));
++	float3 T2 = cross(N, T1);
++	float3x3 TangentBasis = float3x3(T1, T2, N);
++
++	LTC = mul(LTC, TangentBasis);
++	InvLTC = mul(transpose(TangentBasis), InvLTC);
++
++	float3 Poly[4];
++	Poly[0] = mul(LTC, Rect.Origin - Rect.Axis[0] * Rect.Extent.x - Rect.Axis[1] * Rect.Extent.y);
++	Poly[1] = mul(LTC, Rect.Origin + Rect.Axis[0] * Rect.Extent.x - Rect.Axis[1] * Rect.Extent.y);
++	Poly[2] = mul(LTC, Rect.Origin + Rect.Axis[0] * Rect.Extent.x + Rect.Axis[1] * Rect.Extent.y);
++	Poly[3] = mul(LTC, Rect.Origin - Rect.Axis[0] * Rect.Extent.x + Rect.Axis[1] * Rect.Extent.y);
++
++	// Vector irradiance
++	float3 L = PolygonIrradiance(Poly);
++
++	float LengthSqr = dot(L, L);
++	float InvLength = rsqrt(LengthSqr);
++	float Length = LengthSqr * InvLength;
++
++	// Mean light direction
++	L *= InvLength;
++
++	// Solid angle of sphere		= 2*PI * ( 1 - sqrt(1 - r^2 / d^2 ) )
++	// Cosine weighted integration	= PI * r^2 / d^2
++	// SinAlphaSqr = r^2 / d^2;
++	float SinAlphaSqr = Length;
++
++	float NoL = SphereHorizonCosWrap(L.z, SinAlphaSqr);
++	float Irradiance = SinAlphaSqr * NoL;
++
++	// Kill negative and NaN
++	Irradiance = -min(-Irradiance, 0.0);
++
++#if 0
++		float NoL;
++		float VoL = dot(V, L);
++		float Falloff;
++		RectIrradianceLambert( N, Rect, Falloff, VoL );
++
++		float a2 = Pow4( Roughness );
++		Irradiance = Irradiance * ( 1 - a2*a2 )  a2 * Falloff * VoL;
++#endif
++	
++	SpecularColor = LTCAmp.y(LTCAmp.x - LTCAmp.y) * SpecularColor;
++	
++		// Transform to world space
++	L = mul(InvLTC, L);
++	
++		//float3 LightColor = SampleSourceTexture( L, Rect );
++	float3 LightColor = SampleSourceTexture(L, Rect, RectTexture);
++		//float Vis = Vis_SmithJointApprox( a2, Context.NoV, NoL );
++		//float3 F = F_Schlick( SpecularColor, Context.VoH );
++	
++	return LightColor * Irradiance * SpecularColor;
++		//return (LightColor * Vis) * Irradiance * F
++}
+ 
+ // Rectangle projected to a sphere
+ // [Urena et al. 2013, "An Area-Preserving Parametrization for Spherical Rectangles"]
+diff --git a/Engine/Shaders/Private/RequiredTextureResolutionPixelShader.usf b/Engine/Shaders/Private/RequiredTextureResolutionPixelShader.usf
+index 81d5600aa62..d282cd87908 100644
+--- a/Engine/Shaders/Private/RequiredTextureResolutionPixelShader.usf
++++ b/Engine/Shaders/Private/RequiredTextureResolutionPixelShader.usf
+@@ -115,6 +115,7 @@ void Main(
+ 		half4 SSData = GetMaterialSubsurfaceDataRaw(PixelMaterialInputs);
+ 		float Custom0 = GetMaterialCustomData0(MaterialParameters);
+ 		float Custom1 = GetMaterialCustomData1(MaterialParameters);
++		//float Custom2 = GetMaterialCustomData2(MaterialParameters);
+ 		float MaterialAO = GetMaterialAmbientOcclusionRaw(PixelMaterialInputs);
+ 		float PixelDepthOffset = GetMaterialPixelDepthOffset(PixelMaterialInputs);
+ #if CLEAR_COAT_BOTTOM_NORMAL && NUM_MATERIAL_OUTPUTS_CLEARCOATBOTTOMNORMAL > 0
+diff --git a/Engine/Shaders/Private/ShadingCommon.ush b/Engine/Shaders/Private/ShadingCommon.ush
+index e54e5d3fb46..0f1007d0137 100644
+--- a/Engine/Shaders/Private/ShadingCommon.ush
++++ b/Engine/Shaders/Private/ShadingCommon.ush
+@@ -18,7 +18,10 @@
+ #define SHADINGMODELID_SINGLELAYERWATER		10
+ #define SHADINGMODELID_THIN_TRANSLUCENT		11
+ #define SHADINGMODELID_STRATA				12		// Temporary while we convert everything to Strata
+-#define SHADINGMODELID_NUM					13
++#define SHADINGMODELID_RETRO_REFLECTIVE		13
++#define SHADINGMODELID_LIT_ORENNAYAR		14
++#define SHADINGMODELID_LIT_GOTANDA			15
++#define SHADINGMODELID_NUM					16
+ #define SHADINGMODELID_MASK					0xF		// 4 bits reserved for ShadingModelID			
+ 
+ // The flags are defined so that 0 value has no effect!
+@@ -59,6 +62,9 @@ float3 GetShadingModelColor(uint ShadingModelID)
+ 	else if (ShadingModelID == SHADINGMODELID_SINGLELAYERWATER) return float3(0.5f, 0.5f, 1.0f);
+ 	else if (ShadingModelID == SHADINGMODELID_THIN_TRANSLUCENT) return float3(1.0f, 0.8f, 0.3f);
+ 	else if (ShadingModelID == SHADINGMODELID_STRATA) return float3(1.0f, 1.0f, 0.0f);
++	else if (ShadingModelID == SHADINGMODELID_RETRO_REFLECTIVE) return float3(0.1f, 1.0f, 0.5f); // Fallout 3 Green
++	else if (ShadingModelID == SHADINGMODELID_LIT_ORENNAYAR) return float3(0.8f, 1.0f, 0.5f); // Lighter Green
++	else if (ShadingModelID == SHADINGMODELID_LIT_GOTANDA) return float3(0.4f, 0.7f, 0.6f); // Green
+ 	else return float3(1.0f, 1.0f, 1.0f); // White
+ #else
+ 	switch(ShadingModelID)
+@@ -76,6 +82,9 @@ float3 GetShadingModelColor(uint ShadingModelID)
+ 		case SHADINGMODELID_SINGLELAYERWATER: return float3(0.5f, 0.5f, 1.0f);
+ 		case SHADINGMODELID_THIN_TRANSLUCENT: return float3(1.0f, 0.8f, 0.3f);
+ 		case SHADINGMODELID_STRATA: return float3(1.0f, 1.0f, 0.0f);
++		case SHADINGMODELID_RETRO_REFLECTIVE: return float3(0.1f, 1.0f, 0.5f); // Fallout 3 Green
++		case SHADINGMODELID_LIT_ORENNAYAR: return float3(0.8f, 1.0f, 0.5f); // Lighter Green
++		case SHADINGMODELID_LIT_GOTANDA: return float3(0.4f, 0.7f, 0.6f); // Green
+ 		default: return float3(1.0f, 1.0f, 1.0f); // White
+ 	}
+ #endif
+diff --git a/Engine/Shaders/Private/ShadingModels.ush b/Engine/Shaders/Private/ShadingModels.ush
+index b4489046ffd..5142bf9860f 100644
+--- a/Engine/Shaders/Private/ShadingModels.ush
++++ b/Engine/Shaders/Private/ShadingModels.ush
+@@ -170,6 +170,35 @@ float3 DualSpecularGGX(float AverageRoughness, float Lobe0Roughness, float Lobe1
+ 	return (D * Vis) * F;
+ }
+ 
++float3 SpecularGRX(float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
++{
++	float a2 = Pow4(Roughness);
++	float Energy = EnergyNormalization(a2, Context.VoH, AreaLight);
++          
++	float D = D_GGX(a2, Context.VoL) * Energy;
++	float Vis = Vis_SmithJointApprox(a2, Context.NoV, NoL);
++	float3 F = F_Schlick(SpecularColor, Context.VoH);
++          
++	return (D * Vis) * F;
++}
++
++float3 DualSpecularGGX(float AverageRoughness, float Lobe0Roughness, float Lobe1Roughness, float LobeMix, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
++{
++	float AverageAlpha2 = Pow4(AverageRoughness);
++	float Lobe0Alpha2 = Pow4(Lobe0Roughness);
++	float Lobe1Alpha2 = Pow4(Lobe1Roughness);
++
++	float Lobe0Energy = EnergyNormalization(Lobe0Alpha2, Context.VoH, AreaLight);
++	float Lobe1Energy = EnergyNormalization(Lobe1Alpha2, Context.VoH, AreaLight);
++
++	// Generalized microfacet specular
++	float D = lerp(D_GGX(Lobe0Alpha2, Context.NoH) * Lobe0Energy, D_GGX(Lobe1Alpha2, Context.NoH) * Lobe1Energy, LobeMix);
++	float Vis = Vis_SmithJointApprox(AverageAlpha2, Context.NoV, NoL); // Average visibility well approximates using two separate ones (one per lobe).
++	float3 F = F_Schlick(SpecularColor, Context.VoH);
++
++	return (D * Vis) * F;
++}
++
+ FDirectLighting DefaultLitBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow )
+ {
+ 	BxDFContext Context;
+@@ -220,6 +249,112 @@ FDirectLighting DefaultLitBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L,
+ 	return Lighting;
+ }
+ 
++FDirectLighting DefaultLitOrenNayarBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
++{
++	BxDFContext Context;
++	const float RetroreflectionMask		= GBuffer.CustomData.x;
++	const float RetroreflectionDepth	= GBuffer.CustomData.y;
++#if SUPPORTS_ANISOTROPIC_MATERIALS
++	bool bHasAnisotropy = HasAnisotropy(GBuffer.SelectiveOutputMask);
++#else
++	bool bHasAnisotropy = false;
++#endif
++
++	BRANCH
++	if (bHasAnisotropy)
++	{
++		half3 X = GBuffer.WorldTangent;
++		half3 Y = normalize(cross(N, X));
++		Init(Context, N, X, Y, V, L);
++	}
++	else
++	{
++		Init(Context, N, V, L);
++		SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
++	}
++
++	Context.NoV = saturate(abs( Context.NoV ) + 1e-5);
++
++	FDirectLighting Lighting;
++	//Lighting.Diffuse  = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_Lambert( GBuffer.DiffuseColor );
++	Lighting.Diffuse  = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_OrenNayar( GBuffer.DiffuseColor, GBuffer.Roughness, Context.NoV, Context.NoL, Context.VoH );
++
++	BRANCH
++	if (bHasAnisotropy)
++	{
++		//Lighting.Specular = GBuffer.WorldTangent * .5f + .5f;
++		Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.Anisotropy, GBuffer.SpecularColor, Context, NoL, AreaLight);
++	}
++	else
++	{
++		if( AreaLight.bIsRect )
++		{
++			Lighting.Specular = RectGGXApproxLTC(GBuffer.Roughness, GBuffer.SpecularColor, N, V, AreaLight.Rect, AreaLight.Texture);
++		}
++		else
++		{
++			Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight);
++		}
++	}
++
++	Lighting.Transmission = 0;
++	return Lighting;
++}
++          
++FDirectLighting DefaultLitGotandaBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
++{
++	BxDFContext Context;
++
++#if SUPPORTS_ANISOTROPIC_MATERIALS
++	bool bHasAnisotropy = HasAnisotropy(GBuffer.SelectiveOutputMask);
++#else
++	bool bHasAnisotropy = false;
++#endif
++
++	BRANCH
++	if (bHasAnisotropy)
++	{
++		half3 X = GBuffer.WorldTangent;
++		half3 Y = normalize(cross(N, X));
++		Init(Context, N, X, Y, V, L);
++	}
++	else
++	{
++		Init(Context, N, V, L);
++		SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
++	}
++
++	Context.NoV = saturate(abs( Context.NoV ) + 1e-5);
++
++	FDirectLighting Lighting;
++	//Lighting.Diffuse  = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_Lambert( GBuffer.DiffuseColor );
++	Lighting.Diffuse  = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_Chan	( GBuffer.DiffuseColor, GBuffer.Roughness, Context.NoV, Context.NoL, Context.VoH, Context.NoH );
++	//Uncomment below and comment above for Diffuse Gotanda
++	//Lighting.Diffuse  = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_Gotanda( GBuffer.DiffuseColor, GBuffer.Roughness, Context.NoV, Context.NoL, Context.VoH );
++
++	BRANCH
++	if (bHasAnisotropy)
++	{
++		//Lighting.Specular = GBuffer.WorldTangent * .5f + .5f;
++		Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.Anisotropy, GBuffer.SpecularColor, Context, NoL, AreaLight);
++	}
++	else
++	{
++		if( AreaLight.bIsRect )
++		{
++			Lighting.Specular = RectGGXApproxLTC(GBuffer.Roughness, GBuffer.SpecularColor, N, V, AreaLight.Rect, AreaLight.Texture);
++		}
++		else
++		{
++			Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight);
++		}
++	}
++
++	Lighting.Transmission = 0;
++	return Lighting;
++}
++
++
+ float3 SimpleShading( float3 DiffuseColor, float3 SpecularColor, float Roughness, float3 L, float3 V, half3 N )
+ {
+ 	float3 H = normalize(V + L);
+@@ -656,6 +791,89 @@ FDirectLighting TwoSidedBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L, f
+ 	return Lighting;
+ }
+ 
++//Retroreflectivity - BxDF (Direct lighting) retroreflective shine (Based on clear coat/undercoat shine)
++//Current efficiency: 40% out of 100% based on time taken to compile, calculate and render using the fewest lines of code.
++FDirectLighting RetroReflectiveBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow )
++{
++	const float RetroreflectionMask			= GBuffer.CustomData.x;
++	const float RetroreflectionDepth	= max(GBuffer.CustomData.y, 0.02f);
++	const float Opacity = GBuffer.CustomData.a;
++	const float RetroreflectionIntensityNew = 1.0f;
++	const float Film = 1 * RetroreflectionMask;
++	const float MetalSpec = 0.99;
++
++	BxDFContext Context;
++
++#if SUPPORTS_ANISOTROPIC_MATERIALS
++	bool bHasAnisotropy = HasAnisotropy(GBuffer.SelectiveOutputMask);
++#else
++	bool bHasAnisotropy = false;
++#endif
++
++	BRANCH
++	if (bHasAnisotropy)
++	{
++		half3 X = GBuffer.WorldTangent;
++		half3 Y = normalize(cross(N, X));
++		Init(Context, N, X, Y, V, L);
++	}
++	else
++	{
++		Init(Context, N, V, L);
++		SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
++	}
++
++	Context.NoV = saturate(abs( Context.NoV ) + 1e-5);
++
++	FDirectLighting Lighting;
++	Lighting.Diffuse  = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_Lambert( GBuffer.DiffuseColor );
++
++		
++	BRANCH
++	if (bHasAnisotropy)
++	{
++		//float AdjustedRoughness = GBuffer.Roughness * RetroreflectionIntensityNew;
++		//float3 SpecColorMultAniso = GBuffer.BaseColor * 1.1;
++		//float3 RetroreflectionColorAniso = lerp( GBuffer.DiffuseColor, SpecColorMultAniso, RetroreflectionDepth );
++		//Lighting.Specular = GBuffer.WorldTangent * .5f + .5f;
++		//float3 CommonSpecAniso = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.Anisotropy, GBuffer.SpecularColor, Context, NoL, AreaLight);
++		//float3 RetroreflectSpecAniso = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGRXAniso( AdjustedRoughness, GBuffer.Anisotropy, RetroreflectionColor, Context, NoL, AreaLight);
++		Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.Anisotropy, GBuffer.SpecularColor, Context, NoL, AreaLight);
++
++	}
++	else
++	{
++	
++	float AdjustedRoughness = GBuffer.Roughness * RetroreflectionIntensityNew;
++	float3 SpecColorMult = GBuffer.BaseColor * 1.1;
++	float3 RetroreflectionColor = lerp( GBuffer.DiffuseColor, SpecColorMult, RetroreflectionDepth );
++	
++		if( AreaLight.bIsRect )
++		{
++			float3 DefaultSpecular = RectGGXApproxLTC(GBuffer.Roughness, RetroreflectionColor, N, -V, AreaLight.Rect, AreaLight.Texture);
++			float3 RefractedSpecular = RectGGXApproxLTC(GBuffer.Roughness, GBuffer.SpecularColor, N, V, AreaLight.Rect, AreaLight.Texture);
++			Lighting.Specular = lerp(DefaultSpecular, RefractedSpecular, RetroreflectionMask);
++		}
++		else
++		{
++			//float AdjustedRoughness = GBuffer.Roughness * RetroreflectionIntensityNew;
++			//float3 SpecColorMult = GBuffer.BaseColor * 1.1;
++			//float3 RetroreflectionColor = lerp( GBuffer.DiffuseColor, SpecColorMult, RetroreflectionDepth );
++		
++			float3 CommonSpecularAlt = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX( GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight );
++			float3 TopSpecular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX( GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight );
++			float3 RetroreflectSpecularTop = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGRX( AdjustedRoughness, RetroreflectionColor, Context, NoL, AreaLight );
++		
++			float3 RetroreflectSpecFinal = lerp( CommonSpecularAlt, RetroreflectSpecularTop, RetroreflectionIntensityNew );
++			Lighting.Specular = lerp(CommonSpecularAlt, RetroreflectSpecularTop, RetroreflectionMask);
++		}
++	}
++
++	Lighting.Transmission = 0;
++	return Lighting;
++}
++
++
+ FDirectLighting EyeBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow )
+ {
+ #if IRIS_NORMAL
+@@ -755,6 +973,12 @@ FDirectLighting IntegrateBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L,
+ 			return ClothBxDF( GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow );
+ 		case SHADINGMODELID_EYE:
+ 			return EyeBxDF( GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow );
++		case SHADINGMODELID_RETRO_REFLECTIVE:
++			return RetroReflectiveBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
++		case SHADINGMODELID_LIT_ORENNAYAR:
++			return DefaultLitOrenNayarBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
++		case SHADINGMODELID_LIT_GOTANDA:
++			return DefaultLitGotandaBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+ 		default:
+ 			return (FDirectLighting)0;
+ 	}
+index b4489046ffd..85ce8f589a3 100644
+--- a/Engine/Shaders/Private/ShadingModels.ush
++++ b/Engine/Shaders/Private/ShadingModels.ush
+@@ -153,6 +153,58 @@ float3 SpecularGGX( float Roughness, float3 SpecularColor, BxDFContext Context,
+ 	return (D * Vis) * F;
+ }
+ 
++float3 SpecularBlinn(float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
++{
++	float a2 = Pow4(Roughness);
++	float Energy = EnergyNormalization(a2, Context.VoH, AreaLight);
++          	
++          	// Generalized microfacet specular
++	float D = D_Blinn(a2, Context.NoH) * Energy;
++	float Vis = Vis_SmithJointApprox(a2, Context.NoV, NoL);
++	float3 F = F_Schlick(SpecularColor, Context.VoH);
++          
++	return (D * Vis) * F;
++}
++          
++float3 SpecularBlinnRetro(float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
++{
++	float a2 = Pow4(Roughness);
++	float Energy = EnergyNormalization(a2, Context.VoH, AreaLight);
++          	
++          	// Generalized microfacet specular
++	float D = D_Blinn(a2, Context.VoL) * Energy;
++	float Vis = Vis_SmithJointApprox(a2, Context.NoV, NoL);
++	float3 F = F_Schlick(SpecularColor, Context.VoH);
++          
++	return (D * Vis) * F;
++}
++          
++float3 SpecularCharlie(float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
++{
++	float a2 = Pow4(Roughness);
++	float Energy = EnergyNormalization(a2, Context.VoH, AreaLight);
++          	
++          	// Generalized microfacet specular
++	float D = D_Charlie(a2, Context.NoH) * Energy;
++	float Vis = Vis_SmithJointApprox(a2, Context.NoV, NoL);
++	float3 F = F_Schlick(SpecularColor, Context.VoH);
++          
++	return (D * Vis) * F;
++}
++          
++float3 SpecularBeckmann(float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
++{
++	float a2 = Pow4(Roughness);
++	float Energy = EnergyNormalization(a2, Context.VoH, AreaLight);
++          	
++          	// Generalized microfacet specular
++	float D = D_Beckmann(a2, Context.NoH) * Energy;
++	float Vis = Vis_SmithJointApprox(a2, Context.NoV, NoL);
++	float3 F = F_Schlick(SpecularColor, Context.VoH);
++          
++	return (D * Vis) * F;
++}
++
+ float3 DualSpecularGGX(float AverageRoughness, float Lobe0Roughness, float Lobe1Roughness, float LobeMix, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
+ {
+ 	float AverageAlpha2 = Pow4(AverageRoughness);
+@@ -170,6 +222,55 @@ float3 DualSpecularGGX(float AverageRoughness, float Lobe0Roughness, float Lobe1
+ 	return (D * Vis) * F;
+ }
+ 
++float3 DualSpecularRRX(float Mask, float AverageRoughness, float Lobe0Roughness, float Lobe1Roughness, float LobeMix, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
++{
++          	//float RetroMask = Mask;
++	float AverageAlpha2 = Pow4(AverageRoughness);
++	float Lobe0Alpha2 = Pow4(Lobe0Roughness);
++	float Lobe1Alpha2 = Pow4(Lobe1Roughness);
++          
++	float Lobe0Energy = EnergyNormalization(Lobe0Alpha2, Context.VoH, AreaLight);
++	float Lobe1Energy = EnergyNormalization(Lobe1Alpha2, Context.VoH, AreaLight);
++          
++          	// Generalized microfacet specular
++	float D = lerp(D_GGX(Lobe0Alpha2, Context.NoH) * Lobe0Energy, D_GGX(Lobe1Alpha2, Context.VoL) * Lobe1Energy, Mask);
++	float Vis = Vis_SmithJointApprox(AverageAlpha2, Context.NoV, NoL); // Average visibility well approximates using two separate ones (one per lobe).
++	float3 F = F_Schlick(SpecularColor, Context.VoH);
++          
++	return (D * Vis) * F;
++}
++          
++          //Retroreflective Dealies
++float3 SpecularGRX(float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
++{
++	float a2 = Pow4(Roughness);
++	float Energy = EnergyNormalization(a2, Context.VoH, AreaLight);
++          
++	float D = D_GGX(a2, Context.VoL) * Energy;
++	float Vis = Vis_SmithJointApprox(a2, Context.NoV, NoL);
++	float3 F = F_Schlick(SpecularColor, Context.VoH);
++          
++	return (D * Vis) * F;
++}
++          
++          //Diffuse Disney-Frostbite
++          /*float3 LocalDiffuse_Frostbite(float NoV, float NoL, float LoH, BxDFContext Context, float roughness)
++          {
++          	float energyBias = lerp( 0, 0.5, GBuffer.Roughness );
++          	float energyFactor = lerp ( 1.0, 1.0 / 1.51, GBuffer.Roughness );
++          	float fd90 = energyBias       2.0 * LoH*LoH * GBuffer.Roughness;
++          	//float3 f0 = ( 1.0f, 1.0f, 1.0f );
++          	float3 f0 = GBuffer.DiffuseColor;
++          	float3 f1 = GBuffer.SpecularColor;
++          	
++          	float3 lightScatter = f0       (fd90 - f0) * pow(max(1.0f - NoL, 0.1f), 5.0f);
++          	float3 viewScatter = f0       (fd90 - f0) * pow(max(1.0f - Context.NoV, 0.1f), 5.0f);
++          	float3 lightScatterSpec = f1       (fd90 - f1) * pow(max(1.0f - NoL, 0.1f), 5.0f);
++          	float3 viewScatterSpec = f1       (fd90 - f1) * pow(max(1.0f - Context.NoV, 0.1f), 5.0f);
++          	
++          	return 
++          }*/
++
+ FDirectLighting DefaultLitBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow )
+ {
+ 	BxDFContext Context;
+@@ -220,6 +321,110 @@ FDirectLighting DefaultLitBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L,
+ 	return Lighting;
+ }
+ 
++FDirectLighting DefaultLitOrenNayarBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
++{
++	BxDFContext Context;
++          
++#if SUPPORTS_ANISOTROPIC_MATERIALS
++          	bool bHasAnisotropy = HasAnisotropy(GBuffer.SelectiveOutputMask);
++#else
++	bool bHasAnisotropy = false;
++#endif
++          
++	BRANCH
++     
++	if (bHasAnisotropy)
++	{
++		half3 X = GBuffer.WorldTangent;
++		half3 Y = normalize(cross(N, X));
++		Init(Context, N, X, Y, V, L);
++	}
++	else
++	{
++		Init(Context, N, V, L);
++		SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
++	}
++          
++	Context.NoV = saturate(abs(Context.NoV)1e-5);
++          
++	FDirectLighting Lighting;
++	Lighting.Diffuse = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_OrenNayar(GBuffer.DiffuseColor, GBuffer.Roughness, Context.NoV, NoL, Context.VoH);
++          
++	BRANCH
++     
++	if (bHasAnisotropy)
++	{
++          		//Lighting.Specular = GBuffer.WorldTangent * .5f       .5f;
++		Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.Anisotropy, GBuffer.SpecularColor, Context, NoL, AreaLight);
++	}
++	else
++	{
++		if (AreaLight.bIsRect)
++		{
++			Lighting.Specular = RectGGXApproxLTC(GBuffer.Roughness, GBuffer.SpecularColor, N, V, AreaLight.Rect, AreaLight.Texture);
++		}
++		else
++		{
++			Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularCharlie(GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight);
++		}
++	}
++          
++	Lighting.Transmission = 0;
++	return Lighting;
++}
++          
++FDirectLighting DefaultLitGotandaBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
++{
++	BxDFContext Context;
++          
++#if SUPPORTS_ANISOTROPIC_MATERIALS
++          	bool bHasAnisotropy = HasAnisotropy(GBuffer.SelectiveOutputMask);
++#else
++	bool bHasAnisotropy = false;
++#endif
++          
++	BRANCH
++     
++	if (bHasAnisotropy)
++	{
++		half3 X = GBuffer.WorldTangent;
++		half3 Y = normalize(cross(N, X));
++		Init(Context, N, X, Y, V, L);
++	}
++	else
++	{
++		Init(Context, N, V, L);
++		SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
++	}
++          
++	Context.NoV = saturate(abs(Context.NoV)1e-5);
++          
++	FDirectLighting Lighting;
++	Lighting.Diffuse = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_Gotanda(GBuffer.DiffuseColor, GBuffer.Roughness, Context.NoV, NoL, Context.VoH);
++          
++	BRANCH
++     
++	if (bHasAnisotropy)
++	{
++          		//Lighting.Specular = GBuffer.WorldTangent * .5f       .5f;
++		Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.Anisotropy, GBuffer.SpecularColor, Context, NoL, AreaLight);
++	}
++	else
++	{
++		if (AreaLight.bIsRect)
++		{
++			Lighting.Specular = RectGGXApproxLTC(GBuffer.Roughness, GBuffer.SpecularColor, N, V, AreaLight.Rect, AreaLight.Texture);
++		}
++		else
++		{
++			Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularBlinn(GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight);
++		}
++	}
++          
++	Lighting.Transmission = 0;
++	return Lighting;
++}
++
+ float3 SimpleShading( float3 DiffuseColor, float3 SpecularColor, float Roughness, float3 L, float3 V, half3 N )
+ {
+ 	float3 H = normalize(V + L);
+@@ -255,6 +460,30 @@ float3 CalcThinTransmission(float NoL, float NoV, FGBufferData GBuffer)
+ 	return Transmission;
+ }
+ 
++float3 CalcThinRetroTransmission(float NoL, float NoV, FGBufferData GBuffer)
++{
++	float3 Transmission = 1.0;
++	float AbsorptionMix = GBuffer.Specular;
++	if (AbsorptionMix > 0.0)
++	{
++          		// Normalized layer thickness documented for clarity
++		float NormalizedLayerThickness = 1.0;
++		float ThinDistance = NormalizedLayerThickness * (rcp(NoV)
++
++		rcp(NoL));
++          
++          		// Base color represents reflected color viewed at 0 incidence angle, after being absorbed through the substrate.
++          		// Because of this, extinction is normalized by traveling through layer thickness twice
++		float3 TransmissionColor = Diffuse_Lambert(GBuffer.BaseColor);
++		float3 ExtinctionCoefficient = -log(TransmissionColor) / (2.0 * NormalizedLayerThickness);
++		float3 OpticalDepth = ExtinctionCoefficient * max(ThinDistance - 2.0 * NormalizedLayerThickness, 0.0);
++		Transmission = saturate(exp(-OpticalDepth));
++		Transmission = lerp(1.0, Transmission, AbsorptionMix);
++	}
++          
++	return Transmission;
++}
++
+ float RefractBlend(float VoH, float Eta)
+ {
+ 	// Refraction blend factor for normal component of VoH
+@@ -656,6 +885,313 @@ FDirectLighting TwoSidedBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L, f
+ 	return Lighting;
+ }
+ 
++     //Retroreflectivity - BxDF (Direct lighting) retroreflective shine (Based on clear coat/undercoat shine)
++          //Current efficiency: 40% out of 100% based on time taken to compile, calculate and render using the fewest lines of code.
++FDirectLighting RetroReflectiveBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
++{
++	BxDFContext Context;
++	const float RetroreflectionMask = GBuffer.CustomData.x;
++	const float RetroreflectionRoughness = max(GBuffer.CustomData.y, 0.02f);
++	const float RetroreflectionRoughness2 = GBuffer.CustomData.y;
++	const float RetroreflectionDepth = GBuffer.CustomData.y;
++	//const float RetroreflectionIntensity = GBuffer.CustomData.z;
++	const float RetroreflectionMaskInv = 1 - GBuffer.CustomData.x;
++	const float Film = 1 * RetroreflectionMask;
++          	//const float MetalSpec = pow(GBuffer.Metallic,2);
++	const float MetalSpec = 0.99;
++          	//const float MetalSpec = GBuffer.Specular;
++          	
++          	//Debug: uncomment to remove specularity to check diffuse model
++          	//const float Specular = 0f;
++          	
++          	//float ClampedRoughness = clamp(GBuffer.Roughness, 1/255.0f, 1.0f);
++          		
++	FDirectLighting Lighting =
++	{
++		float3(0.0, 0.0, 0.0),
++          		float3(0.0, 0.0, 0.0),
++          		float3(0.0, 0.0, 0.0)
++	};
++          	
++          	//FDirectLighting Lighting;
++          	
++	half3 Nspec = N;
++	half NoLSpec = NoL;
++          
++          	//if (CLEAR_COAT_BOTTOM_NORMAL)
++          	//{
++	Nspec = GBuffer.WorldNormal;
++          	//}
++          
++          
++#if SUPPORTS_ANISOTROPIC_MATERIALS
++          	bool bHasAnisotropy = HasAnisotropy(GBuffer.SelectiveOutputMask);
++#else
++	bool bHasAnisotropy = false;
++#endif
++              
++	half3 X = 0;
++	half3 Y = 0;
++          	
++	float RoughnessX = 0;
++	float RoughnessY = 0;
++          
++	BRANCH
++     
++	if (bHasAnisotropy)
++	{
++		X = GBuffer.WorldTangent;
++		Y = normalize(cross(N, X));
++		Init(Context, Nspec, X, Y, V, L);
++	}
++	else
++	{
++		Init(Context, Nspec, V, L);
++		SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
++	}
++          
++          	
++          	//Init( Context, N, V, L );
++          	//SphereMaxNoH( Context, AreaLight.SphereSinAlpha, true );
++          	//Context.NoV = saturate( abs( Context.NoV )       1e-5 );
++          	
++          	// Modify SphereSinAlpha, knowing that it was previously manipulated by roughness of the under coat
++          	// Note: the operation is not invertible for GBuffer.Roughness = 1.0, so roughness is clamped to 254.0/255.0
++	float SphereSinAlpha = AreaLight.SphereSinAlpha;
++	float RoughnessCompensation = 1 - Pow2(GBuffer.Roughness); // Used to be RetroreflectionDepth or RetroreflectionRoughness
++	float Alpha = Pow2(RetroreflectionRoughness);
++	RoughnessCompensation = RoughnessCompensation > 0.0 ? (1 - Alpha) / RoughnessCompensation : 0.0;
++	AreaLight.SphereSinAlpha = saturate(AreaLight.SphereSinAlpha * RoughnessCompensation);
++          
++	SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
++	Context.NoV = saturate(abs(Context.NoV)1e-5);
++	Context.VoH = AreaLight.bIsRect ? Context.NoV : Context.VoH;
++          
++          	// Hard-coded Fresnel evaluation with IOR = 1.5 (for polyurethane cited by Disney BRDF)
++	float F0 = 0.04;
++	float Fc = Pow5(1 - Context.VoH);
++	float F = Fc(1 - Fc) * F0;
++	float RRPow = Pow2(GBuffer.Roughness);
++	float RR0 = RetroreflectionIntensity / RetroreflectionMask * RRPow;
++          	
++          	
++	if (AreaLight.bIsRect)
++	{
++		float3 RectRetroSpec = RectGGXApproxLTC(RR0, F0, Nspec, -V, AreaLight.Rect, AreaLight.Texture);
++		float3 RectNormalSpec = RectGGXApproxLTC(GBuffer.Roughness, F0, Nspec, V, AreaLight.Rect, AreaLight.Texture);
++		Lighting.Specular = lerp(RectNormalSpec, RectRetroSpec, RetroreflectionMask);
++	}
++	else
++	{
++          		// Second roughness for retroreflection
++          		//float a2a = Pow2( RetroreflectionRoughness2 );
++		float AdjustedRoughness = GBuffer.Roughness * RetroreflectionIntensity;
++          		// Generalized microfacet specular
++		float a2 = Pow2(GBuffer.Roughness); // GBuffer.Roughness used to be Alpha
++          		//float CommonEnergy = EnergyNormalization( a2a, Context.VoH, AreaLight );
++		float RetroreflectEnergy = EnergyNormalization(a2, Context.VoH, AreaLight);
++		float D = D_GGX(a2, Context.NoH) * RetroreflectEnergy;
++		float Vis = Vis_SmithJointApprox(a2, Context.NoV, NoL);
++          
++		float Fr1 = D * Vis * F;
++          		
++		float RoughPow = Pow2(GBuffer.Roughness);
++          		//Maybe move the retroreflection up here?
++          		//Lighting.Specular = RetroreflectionMask * AreaLight.FalloffColor * (Falloff * NoL * Fr1);
++		float3 SpecColorMult = GBuffer.BaseColor * 1.1;
++		float3 RetroreflectionColor = lerp(GBuffer.DiffuseColor, SpecColorMult, RetroreflectionDepth);
++		float3 CommonSpecular = (RetroreflectEnergy * Falloff * D * Vis) * AreaLight.FalloffColor;
++		float3 CommonSpecularAlt = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight);
++		float3 TopSpecular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight);
++		float3 RetroreflectSpecularTop = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGRX(AdjustedRoughness, RetroreflectionColor, Context, NoL, AreaLight);
++          		
++		float3 RetroreflectSpecFinal = lerp(CommonSpecularAlt, RetroreflectSpecularTop, RetroreflectionIntensity);
++          		
++		Lighting.Specular = lerp(CommonSpecularAlt, RetroreflectSpecularTop, RetroreflectionMask);
++          		//Lighting.Specular = TopSpecular * RoughPow; 
++          		//Lighting.Specular = FirstSpecular;
++	}
++          	
++	AreaLight.SphereSinAlpha = SphereSinAlpha;
++          	// Incoming and exiting Fresnel terms are identical to incoming Fresnel term (VoH == HoL)
++          	// float FresnelCoeff = (1.0 - F1) * (1.0 - F2);
++	float FresnelCoeff = 1.0 - F;
++	FresnelCoeff *= FresnelCoeff;
++          
++          	//if (CLEAR_COAT_BOTTOM_NORMAL) -- no longer using clear coat flags!
++          	
++	BxDFContext TempContext;
++          
++	BRANCH
++     
++	if (bHasAnisotropy)
++	{
++		Init(TempContext, N, X, Y, V, L);
++	}
++	else
++	{
++		Init(TempContext, Nspec, V, L);
++	}
++          
++          		// If bottom-normal, update normal-based dot products:
++          		//float NoV;
++          		//float LoH;
++          		
++	float3 H = normalize(VL);
++	float LoH = saturate(dot(L, H));
++	Context.NoH = saturate(dot(N, H));
++	Context.NoV = saturate(dot(N, V));
++	Context.NoL = saturate(dot(N, L));
++	Context.VoL = saturate(dot(V, L));
++	Context.VoH = saturate(dot(V, H));
++          		//Context.LoH = saturate(dot(L, H));
++          
++	Context.XoV = TempContext.XoV;
++	Context.XoL = TempContext.XoL;
++	Context.XoH = TempContext.XoH;
++	Context.YoV = TempContext.YoV;
++	Context.YoL = TempContext.YoL;
++	Context.YoH = TempContext.YoH;
++          
++	if (!bHasAnisotropy)
++	{
++		bool bNewtonIteration = true;
++		SphereMaxNoH(Context, AreaLight.SphereSinAlpha, bNewtonIteration);
++	}
++          
++	Context.NoV = saturate(abs(Context.NoV)1e-5);
++          	
++          	//float3 f0 = ( 1.0f, 1.0f, 1.0f );
++	float3 f0 = GBuffer.DiffuseColor;
++          	
++	half fresnelTerm = Pow4(1.0 - saturate(Context.NoV));
++          	//}
++          
++          	// Propagate refraction through dot-products rather than the original vectors:
++          	// Reference:
++          //	   float Eta = 1.0 / 1.5;
++          //	   float3 H = normalize(V       L);
++          //	   float3 V2 = refract(V, H, Eta);
++          //	   float3 L2 = reflect(V2, H);
++          //	   V2 = -V2;
++          //	   BxDFContext BottomContext;
++          //	   it(BottomContext, N, X, Y, V2, L2);
++	BxDFContext BottomContext = RefractClearCoatContext(Context);
++	BottomContext.VoH = AreaLight.bIsRect ? BottomContext.NoV : BottomContext.VoH;
++          
++          	// Absorption
++	float3 Transmission = CalcThinRetroTransmission(BottomContext.NoL, BottomContext.NoV, GBuffer);
++          	
++          	//float DominantDir = getDiffuseDominantDir(N, V, Context, NoL, GBuffer.Roughness);
++          	
++          	//float3 RetroDiffuse = F * FresnelCoeff * Transmission * Diffuse_Lambert(GBuffer.DiffuseColor);
++          	//float3 RetroDiffuse = FresnelCoeff * Transmission * Diffuse_Gotanda( GBuffer.DiffuseColor, GBuffer.Roughness, Context.NoV, NoL, Context.VoH );
++          	
++          	// Default Lit
++          	//float3 DefaultDiffuse = (Falloff * NoL) * AreaLight.FalloffColor * Diffuse_Burley( GBuffer.DiffuseColor, GBuffer.Roughness, Context.NoV, NoL, Context.VoH );
++	float3 FBDiffuse = Diffuse_Disney(GBuffer.Roughness, Context.NoV, NoL, LoH) * GBuffer.DiffuseColor;
++	float3 DefaultDiffuse = (Falloff * NoL) * AreaLight.FalloffColor * Diffuse_Lambert(GBuffer.DiffuseColor);
++	float3 RetroDiffuse = (Falloff * NoL) * AreaLight.FalloffColor * Diffuse_Lambert(GBuffer.DiffuseColor);
++	float3 RefractedDiffuse = FresnelCoeff * Transmission * DefaultDiffuse; //* DefaultDiffuse
++          	//Lighting.Diffuse = lerp(DefaultDiffuse, RefractedDiffuse, RetroreflectionMask);
++          	//Lighting.Diffuse = DefaultDiffuse;
++	Lighting.Diffuse = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_Lambert(GBuffer.DiffuseColor);
++          
++	if (!bHasAnisotropy && AreaLight.bIsRect)
++	{
++          		// Note: V is used instead of V2 because LTC integration is not tuned to handle refraction direction
++          		// Invert V vect for reflected vis and retroreflective appearance & lerp with standard reflection vec
++		float3 DefaultSpecular = RectGGXApproxLTC(GBuffer.Roughness, GBuffer.SpecularColor, N, -V, AreaLight.Rect, AreaLight.Texture);
++		float3 RefractedSpecular = FresnelCoeff * Transmission * DefaultSpecular;
++		Lighting.Specular = lerp(DefaultSpecular, RefractedSpecular, RetroreflectionMask);
++	}
++	else
++	{
++          
++		float a2 = Pow4(GBuffer.Roughness);
++		float D2 = 0;
++		half D3 = 0;
++		float Vis2 = 0;
++          
++		BRANCH
++     
++		if (bHasAnisotropy)
++		{
++			float ax = 0;
++			float ay = 0;
++			GetAnisotropicRoughness(RetroreflectionDepth, GBuffer.Anisotropy, ax, ay);
++          
++			D2 = D_GGXaniso(ax, ay, Context.VoL, Context.XoH, Context.YoH);
++			Vis2 = Vis_SmithJointAniso(ax, ay, BottomContext.NoV, BottomContext.NoL, BottomContext.XoV, BottomContext.XoL, BottomContext.YoV, BottomContext.YoL);
++		}
++		else
++		{
++			D2 = D_GGX(a2, BottomContext.NoH);
++			D3 = D_NormalGGX(a2, Context.VoL);
++          			// NoL is chosen to provide better parity with DefaultLit when ClearCoat=0
++			Vis2 = Vis_SmithJointApprox(a2, BottomContext.NoV, NoL);
++		}
++          		// When refracting into a non-metallic substrate, the IOR ratio (Eta) between top and bottom interfaces approaches 1.0 and drives Fresnel reflectance to 0
++		float3 F = F_Schlick(GBuffer.SpecularColor, BottomContext.VoH);
++		float3 RefractedF = lerp(0.0, F, GBuffer.Metallic);
++          		
++		float Energy = 0;
++          		
++          		//float AdjustedRoughness = GBuffer.Roughness * RetroreflectionIntensity;
++          		//Changed as non-metallics can also be retro-reflective (there is actually retroreflective yarn!)
++          		//float Energy = EnergyNormalization( a2, Context.VoH, AreaLight );
++          		
++		BRANCH
++     
++		if (bHasAnisotropy)
++		{
++			FAreaLight Punctual = AreaLight;
++			Punctual.SphereSinAlpha = 0;
++			Punctual.SphereSinAlphaSoft = 0;
++			Punctual.LineCosSubtended = 1;
++			Punctual.Rect = (FRect) 0;
++			Punctual.bIsRect = false;
++          			// Rect light not required here.
++          			
++			Energy = EnergyNormalization(a2, Context.VoH, Punctual);
++		}
++		else
++		{
++			Energy = EnergyNormalization(a2, Context.VoH, AreaLight);
++		}
++          
++          		// Note: reusing D, V, and F from refracted context to save computation for when RetroReflectivity < 1 -- SAME AS CLEAR COAT!
++		float ReflectIntensityMult = Pow5(RetroreflectionIntensity);
++          		
++          		//Standard GGX Specular
++		float3 StandardSpecular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight);
++          
++          		//Retroreflective GGX Specular
++		float3 RetroreflectSpecular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGRX(GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight);
++          		
++          		//Common, Default & Refracted Specular
++		float3 D2F = D2 * Energy;
++		float3 D3F = D3 * Energy;
++		float3 ManualSpecular = (D2F * Vis2) * F;
++		float3 ManualRRSpecular = (D3F * Vis2) * F;
++		float3 CommonSpecular = (Energy * Falloff * D2 * Vis2) * AreaLight.FalloffColor;
++		float3 NullSpecular = (Falloff * D2 * Vis2) * AreaLight.FalloffColor;
++		float3 NonSpec = Falloff * AreaLight.FalloffColor;
++		float3 DefaultSpecular = F * NoL;
++		float3 DefaultSpecularV = F * Context.VoL;
++          		//float3 RetroreflectionSpecNew = (Energy * Falloff * D2 * Vis3) * AreaLight.FalloffColor;
++		float3 RefractedSpecular = FresnelCoeff * Transmission * RefractedF * BottomContext.NoL;
++          		
++          		//float3 RetroreflectSpecFinal = lerp( ManualSpecular, ManualRRSpecular, RetroreflectionIntensity );
++          		
++          		//Lerp the common specular with the retroreflection specular, that way there is only one specular shine using the depth mask
++          		//Lighting.Specular      = CommonSpecular * lerp(NullSpecular, RetroreflectSpecFinal, RetroreflectionMask);
++          		//Lighting.Specular      = CommonSpecular * lerp(ManualSpecular, RetroreflectSpecFinal, RetroreflectionMask);
++	}
++          
++	return Lighting;
++}
++
+ FDirectLighting EyeBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow )
+ {
+ #if IRIS_NORMAL
+@@ -755,6 +1291,12 @@ FDirectLighting IntegrateBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L,
+ 			return ClothBxDF( GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow );
+ 		case SHADINGMODELID_EYE:
+ 			return EyeBxDF( GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow );
++		case SHADINGMODELID_RETRO_REFLECTIVE:
++			return RetroReflectiveBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
++		case SHADINGMODELID_LIT_ORENNAYAR:
++			return DefaultLitOrenNayarBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
++		case SHADINGMODELID_LIT_GOTANDA:
++			return DefaultLitGotandaBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+ 		default:
+ 			return (FDirectLighting)0;
+ 	}
+diff --git a/Engine/Shaders/Private/ShadingModelsMaterial.ush b/Engine/Shaders/Private/ShadingModelsMaterial.ush
+index 09768c9d9ed..d2feea2a19b 100644
+--- a/Engine/Shaders/Private/ShadingModelsMaterial.ush
++++ b/Engine/Shaders/Private/ShadingModelsMaterial.ush
+@@ -38,6 +38,37 @@ void SetGBufferForShadingModel(
+ 	if (false)
+ 	{
+ 	}
++	
++#if MATERIAL_SHADINGMODEL_RETRO_REFLECTIVE
++          	else if (ShadingModel == SHADINGMODELID_RETRO_REFLECTIVE)
++          	{
++          		float RetroreflectionMask	= saturate( GetMaterialCustomData0(MaterialParameters) );
++          		float RetroreflectionDepth	= saturate( GetMaterialCustomData1(MaterialParameters) );
++          		//float RetroreflectionIntensity = saturate ( GetMaterialCustomData2(MaterialParameters) );
++          		GBuffer.CustomData.x = RetroreflectionMask;
++          		GBuffer.CustomData.y = RetroreflectionDepth;
++          		//GBuffer.CustomData.z = RetroreflectionIntensity; 
++          		// Clamp roughness to guarantee functional inverse when computing SphereSinAlpha for multiple layers
++          		//GBuffer.Roughness = clamp(GBuffer.Roughness, 0.0, 254.0 / 255.0);
++          		GBuffer.ShadingModelID = SHADINGMODELID_RETRO_REFLECTIVE;
++          		
++          	// Not needed anymore -- not using clear coat anymore. Keep just in case, might re-add & lock to SM5/Windows
++          	}
++#endif
++#if MATERIAL_SHADINGMODEL_LIT_ORENNAYAR
++          	else if (ShadingModel == SHADINGMODELID_LIT_ORENNAYAR)
++          	{
++          		GBuffer.ShadingModelID = SHADINGMODELID_LIT_ORENNAYAR;
++          	}
++#endif
++          
++#if MATERIAL_SHADINGMODEL_LIT_GOTANDA
++          	else if (ShadingModel == SHADINGMODELID_LIT_GOTANDA)
++          	{
++          		GBuffer.ShadingModelID = SHADINGMODELID_LIT_GOTANDA;
++          	}
++#endif
++	
+ #if MATERIAL_SHADINGMODEL_SUBSURFACE
+ 	else if (ShadingModel == SHADINGMODELID_SUBSURFACE)
+ 	{
+diff --git a/Engine/Source/Editor/MaterialEditor/Private/MaterialEditor.cpp b/Engine/Source/Editor/MaterialEditor/Private/MaterialEditor.cpp
+index f275a554be9..1d29c4f8bda 100644
+--- a/Engine/Source/Editor/MaterialEditor/Private/MaterialEditor.cpp
++++ b/Engine/Source/Editor/MaterialEditor/Private/MaterialEditor.cpp
+@@ -4259,6 +4259,7 @@ UClass* FMaterialEditor::GetOnPromoteToParameterClass(const UEdGraphPin* TargetP
+ 			case MP_ShadingModel:
+ 			case MP_OpacityMask:
+ 			case MP_FrontMaterial:
++			//case MP_CustomData2:
+ 				return UMaterialExpressionScalarParameter::StaticClass();
+ 
+ 			case MP_WorldPositionOffset:
+diff --git a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.cpp b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.cpp
+index 3e959ad562e..8f1e49f35a0 100644
+--- a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.cpp
++++ b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.cpp
+@@ -271,6 +271,12 @@ namespace PixelInspector
+ 			return EMaterialShadingModel::MSM_ThinTranslucent;
+ 		case PIXEL_INSPECTOR_SHADINGMODELID_STRATA:
+ 			return EMaterialShadingModel::MSM_Strata;
++		case PIXEL_INSPECTOR_SHADINGMODELID_RETRO_REFLECTIVE:
++			return EMaterialShadingModel::MSM_RetroReflective;
++		case PIXEL_INSPECTOR_SHADINGMODELID_LIT_ORENNAYAR:
++			return EMaterialShadingModel::MSM_Lit_Orennayar;
++		case PIXEL_INSPECTOR_SHADINGMODELID_LIT_GOTANDA:
++			return EMaterialShadingModel::MSM_Lit_Gotanda;
+ 		};
+ 		return EMaterialShadingModel::MSM_DefaultLit;
+ 	}
+@@ -365,6 +371,14 @@ namespace PixelInspector
+ 			IrisDistance = InCustomData.W;
+ 		}
+ 		break;
++		case EMaterialShadingModel::MSM_RetroReflective:
++			{
++				RetroreflectionTangent = FVector(0.0f);
++				RetroreflectionMask = InCustomData.X;
++				RetroreflectionDepth = InCustomData.Y;
++				RetroreflectionIntensity = InCustomData.Z;
++				}
++		break;
+ 		};
+ 	}
+ };
+diff --git a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.h b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.h
+index 2549d92f190..aeea2dcf8b1 100644
+--- a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.h
++++ b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.h
+@@ -18,6 +18,9 @@
+ #define PIXEL_INSPECTOR_SHADINGMODELID_SINGLELAYERWATER 10
+ #define PIXEL_INSPECTOR_SHADINGMODELID_THIN_TRANSLUCENT 11
+ #define PIXEL_INSPECTOR_SHADINGMODELID_STRATA 12
++#define PIXEL_INSPECTOR_SHADINGMODELID_RETRO_REFLECTIVE 13
++#define PIXEL_INSPECTOR_SHADINGMODELID_LIT_ORENNAYAR 14
++#define PIXEL_INSPECTOR_SHADINGMODELID_LIT_GOTANDA 15
+ #define PIXEL_INSPECTOR_SHADINGMODELID_MASK 0xF
+ 
+ namespace PixelInspector
+@@ -59,6 +62,10 @@ namespace PixelInspector
+ 			EyeTangent = FVector(0.0f);
+ 			IrisMask = 0.0f;
+ 			IrisDistance = 0.0f;
++			RetroreflectionTangent = FVector(0.0f);
++			RetroreflectionMask = 0.0f;
++			RetroreflectionDepth = 0.0f;
++			RetroreflectionIntensity = 0.0f;
+ 		}
+ 		// Data Identification
+ 		int32 ViewUniqueId;
+@@ -131,6 +138,13 @@ namespace PixelInspector
+ 		float IrisMask;
+ 		float IrisDistance;
+ 
++		/// Add a float for a mask that will allow retro-reflectivity on select parts of a material
++		// MSM_RetroReflective
++		FVector RetroreflectionTangent;
++		float RetroreflectionMask;
++		float RetroreflectionDepth;
++		float RetroreflectionIntensity;
++
+ 		void DecodeFinalColor(TArray<FColor>& BufferFinalColorValue);
+ 		/** Decodes final color from HDR input. */
+ 		void DecodeFinalColor(TArray<FLinearColor> &BufferFinalColorValue, float InGamma, bool bHasAlphaChannel);
+diff --git a/Engine/Source/Editor/UnrealEd/Private/MaterialGraph.cpp b/Engine/Source/Editor/UnrealEd/Private/MaterialGraph.cpp
+index b8ab6f7ec71..8eec687483d 100644
+--- a/Engine/Source/Editor/UnrealEd/Private/MaterialGraph.cpp
++++ b/Engine/Source/Editor/UnrealEd/Private/MaterialGraph.cpp
+@@ -91,6 +91,7 @@ void UMaterialGraph::RebuildGraphInternal(const TMap<UMaterialExpression*, TArra
+ 		MaterialInputs.Add(FMaterialInputInfo(FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_PixelDepthOffset, Material), MP_PixelDepthOffset, LOCTEXT("PixelDepthOffsetToolTip", "Pixel Depth Offset")));
+ 		MaterialInputs.Add(FMaterialInputInfo(FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_ShadingModel, Material), MP_ShadingModel, LOCTEXT("ShadingModelToolTip", "Selects which shading model should be used per pixel")));
+ 		// STRATA_DISABLED MaterialInputs.Add(FMaterialInputInfo(FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_FrontMaterial, Material), MP_FrontMaterial, LOCTEXT("FrontMaterialToolTip", "Specify the front facing material")));
++		//MaterialInputs.Add(FMaterialInputInfo(FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_CustomData2, Material), MP_CustomData2, FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_CustomData2, Material)));
+ 
+ 		//^^^ New material properties go above here. ^^^^
+ 		MaterialInputs.Add(FMaterialInputInfo(LOCTEXT("MaterialAttributes", "Material Attributes"), MP_MaterialAttributes, LOCTEXT("MaterialAttributesToolTip", "Material Attributes")));
+diff --git a/Engine/Source/Runtime/Engine/Classes/Engine/EngineTypes.h b/Engine/Source/Runtime/Engine/Classes/Engine/EngineTypes.h
+index 7a14cf8edee..f2020cd578b 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Engine/EngineTypes.h
++++ b/Engine/Source/Runtime/Engine/Classes/Engine/EngineTypes.h
+@@ -534,6 +534,9 @@ enum EMaterialShadingModel
+ 	MSM_SingleLayerWater		UMETA(DisplayName="SingleLayerWater"),
+ 	MSM_ThinTranslucent			UMETA(DisplayName="Thin Translucent"),
+ 	MSM_Strata					UMETA(DisplayName="Strata", Hidden),
++	MSM_RetroReflective			UMETA(DisplayName = "Retro-Reflective"),
++	MSM_Lit_Orennayar			UMETA(DisplayName = "Default Lit Orennayar"),
++	MSM_Lit_Gotanda				UMETA(DisplayName = "Default Lit Gotanda"),
+ 	/** Number of unique shading models. */
+ 	MSM_NUM						UMETA(Hidden),
+ 	/** Shading model will be determined by the Material Expression Graph,
+diff --git a/Engine/Source/Runtime/Engine/Classes/Materials/Material.h b/Engine/Source/Runtime/Engine/Classes/Materials/Material.h
+index 9c488281e78..4a5095968cf 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Materials/Material.h
++++ b/Engine/Source/Runtime/Engine/Classes/Materials/Material.h
+@@ -477,6 +477,9 @@ public:
+ 	UPROPERTY()
+ 	FStrataMaterialInput FrontMaterial;
+ 
++	UPROPERTY()
++	FScalarMaterialInput RetroreflectionIntensity;
++
+ 	/** Indicates that the material should be rendered in the SeparateTranslucency Pass (not affected by DOF, requires bAllowSeparateTranslucency to be set in .ini). */
+ 	UPROPERTY(EditAnywhere, Category=Translucency, meta=(DisplayName = "Render After DOF"), AdvancedDisplay)
+ 	uint8 bEnableSeparateTranslucency : 1;
+diff --git a/Engine/Source/Runtime/Engine/Classes/Materials/MaterialExpressionMakeMaterialAttributes.h b/Engine/Source/Runtime/Engine/Classes/Materials/MaterialExpressionMakeMaterialAttributes.h
+index 94124f60449..a3f0f9d8617 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Materials/MaterialExpressionMakeMaterialAttributes.h
++++ b/Engine/Source/Runtime/Engine/Classes/Materials/MaterialExpressionMakeMaterialAttributes.h
+@@ -80,6 +80,9 @@ class UMaterialExpressionMakeMaterialAttributes : public UMaterialExpression
+ 	UPROPERTY()
+ 	FExpressionInput FrontMaterial;
+ 
++	UPROPERTY()
++	FExpressionInput RetroreflectionIntensity;
++
+ 	//~ Begin UObject Interface
+ 	virtual void Serialize(FStructuredArchive::FRecord Record) override;
+ 	//~ End UObject Interface
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/HLSLMaterialTranslator.cpp b/Engine/Source/Runtime/Engine/Private/Materials/HLSLMaterialTranslator.cpp
+index 634116d82d5..05a5a5afdd9 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/HLSLMaterialTranslator.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/HLSLMaterialTranslator.cpp
+@@ -756,6 +756,7 @@ bool FHLSLMaterialTranslator::Translate()
+ 
+ 			Chunk[MP_CustomData0] = Material->CompilePropertyAndSetMaterialProperty(MP_CustomData0, this);
+ 			Chunk[MP_CustomData1] = Material->CompilePropertyAndSetMaterialProperty(MP_CustomData1, this);
++			//Chunk[MP_CustomData2] = Material->CompilePropertyAndSetMaterialProperty(MP_CustomData2, this);
+ 			Chunk[MP_AmbientOcclusion] = Material->CompilePropertyAndSetMaterialProperty(MP_AmbientOcclusion, this);
+ 
+ 			if (IsTranslucentBlendMode(BlendMode) || MaterialShadingModels.HasShadingModel(MSM_SingleLayerWater))
+@@ -1613,6 +1614,25 @@ void FHLSLMaterialTranslator::GetMaterialEnvironment(EShaderPlatform InPlatform,
+ 			OutEnvironment.SetDefine(TEXT("SINGLE_LAYER_WATER_SIMPLE_FORWARD"), TEXT("1"));
+ 		}
+ 
++		if (ShadingModels.HasShadingModel(MSM_RetroReflective))
++		{
++			OutEnvironment.SetDefine(TEXT("MATERIAL_SHADINGMODEL_RETRO_REFLECTIVE"), TEXT("1"));
++			NumSetMaterials;
++		}
++
++		if (ShadingModels.HasShadingModel(MSM_Lit_Orennayar))
++		{
++			OutEnvironment.SetDefine(TEXT("MATERIAL_SHADINGMODEL_ORENNAYAR"), TEXT("1"));
++			NumSetMaterials;
++		}
++
++		if (ShadingModels.HasShadingModel(MSM_Lit_Gotanda))
++		{
++			OutEnvironment.SetDefine(TEXT("MATERIAL_SHADINGMODEL_GOTANDA"), TEXT("1"));
++			NumSetMaterials;
++		}
++
++
+ 		if (NumSetMaterials == 1)
+ 		{
+ 			OutEnvironment.SetDefine(TEXT("MATERIAL_SINGLE_SHADINGMODEL"), TEXT("1"));
+@@ -1972,6 +1992,7 @@ FString FHLSLMaterialTranslator::GetMaterialShaderCode()
+ 	LazyPrintf.PushParam(!bEnableExecutionFlow ? *GenerateFunctionCode(MP_TessellationMultiplier, BaseDerivativeVariation) : TEXT("return 0.0f"));
+ 	LazyPrintf.PushParam(!bEnableExecutionFlow ? *GenerateFunctionCode(MP_CustomData0, BaseDerivativeVariation) : TEXT("return 0.0f"));
+ 	LazyPrintf.PushParam(!bEnableExecutionFlow ? *GenerateFunctionCode(MP_CustomData1, BaseDerivativeVariation) : TEXT("return 0.0f"));
++	//LazyPrintf.PushParam(!bEnableExecutionFlow ? *GenerateFunctionCode(MP_CustomData2, BaseDerivativeVariation) : TEXT("return 0.0f"));
+ 
+ 	// Print custom texture coordinate assignments, should be fine with regular derivatives
+ 	FString CustomUVAssignments;
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp b/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp
+index e2453f65aae..05ecd9ebfba 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp
+@@ -3839,6 +3839,7 @@ void UMaterial::PostLoad()
+ 	DoMaterialAttributeReorder(&PixelDepthOffset, UE4Ver, RenderObjVer);
+ 	DoMaterialAttributeReorder(&ShadingModelFromMaterialExpression, UE4Ver, RenderObjVer);
+ 	DoMaterialAttributeReorder(&FrontMaterial, UE4Ver, RenderObjVer);
++	DoMaterialAttributeReorder(&RetroreflectionIntensity, UE4Ver, RenderObjVer);
+ #endif // WITH_EDITORONLY_DATA
+ 
+ 	if (!IsDefaultMaterial())
+@@ -5411,6 +5412,7 @@ FExpressionInput* UMaterial::GetExpressionInputForProperty(EMaterialProperty InP
+ 		case MP_PixelDepthOffset:		return &PixelDepthOffset;
+ 		case MP_ShadingModel:			return &ShadingModelFromMaterialExpression;
+ 		case MP_FrontMaterial:			return &FrontMaterial;
++		//case MP_CustomData2:			return &RetroreflectionIntensity;
+ 	}
+ 
+ 	if (InProperty >= MP_CustomizedUVs0 && InProperty <= MP_CustomizedUVs7)
+@@ -5987,6 +5989,7 @@ int32 UMaterial::CompilePropertyEx( FMaterialCompiler* Compiler, const FGuid& At
+ 		case MP_PixelDepthOffset:		return PixelDepthOffset.CompileWithDefault(Compiler, Property);
+ 		case MP_ShadingModel:			return ShadingModelFromMaterialExpression.CompileWithDefault(Compiler, Property);
+ 		case MP_FrontMaterial:			return FrontMaterial.CompileWithDefault(Compiler, Property);
++		//case MP_CustomData2:			return RetroreflectionIntensity.CompileWithDefault(Compiler, Property);
+ 
+ 		default:
+ 			if (Property >= MP_CustomizedUVs0 && Property <= MP_CustomizedUVs7)
+@@ -6427,7 +6430,7 @@ static bool IsPropertyActive_Internal(EMaterialProperty InProperty,
+ 		Active = ShadingModels.IsLit() && (!bIsTranslucentBlendMode || !bIsVolumetricTranslucencyLightingMode);
+ 		break;
+ 	case MP_Anisotropy:
+-		Active = ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat }) && (!bIsTranslucentBlendMode || !bIsVolumetricTranslucencyLightingMode);
++		Active = ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat, MSM_RetroReflective }) && (!bIsTranslucentBlendMode || !bIsVolumetricTranslucencyLightingMode);
+ 		break;
+ 	case MP_Metallic:
+ 		// Subsurface models store opacity in place of Metallic in the GBuffer
+@@ -6437,16 +6440,16 @@ static bool IsPropertyActive_Internal(EMaterialProperty InProperty,
+ 		Active = (ShadingModels.IsLit() && (!bIsTranslucentBlendMode || !bIsNonDirectionalTranslucencyLightingMode)) || bHasRefraction;
+ 		break;
+ 	case MP_Tangent:
+-		Active = ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat }) && (!bIsTranslucentBlendMode || !bIsVolumetricTranslucencyLightingMode);
++		Active = ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat, MSM_RetroReflective }) && (!bIsTranslucentBlendMode || !bIsVolumetricTranslucencyLightingMode);
+ 		break;
+ 	case MP_SubsurfaceColor:
+ 		Active = ShadingModels.HasAnyShadingModel({ MSM_Subsurface, MSM_PreintegratedSkin, MSM_TwoSidedFoliage, MSM_Cloth });
+ 		break;
+ 	case MP_CustomData0:
+-		Active = ShadingModels.HasAnyShadingModel({ MSM_ClearCoat, MSM_Hair, MSM_Cloth, MSM_Eye });
++		Active = ShadingModels.HasAnyShadingModel({ MSM_ClearCoat, MSM_Hair, MSM_Cloth, MSM_Eye, MSM_RetroReflective });
+ 		break;
+ 	case MP_CustomData1:
+-		Active = ShadingModels.HasAnyShadingModel({ MSM_ClearCoat, MSM_Eye });
++		Active = ShadingModels.HasAnyShadingModel({ MSM_ClearCoat, MSM_Eye, MSM_RetroReflective });
+ 		break;
+ 	case MP_TessellationMultiplier:
+ 	case MP_WorldDisplacement:
+@@ -6472,6 +6475,12 @@ static bool IsPropertyActive_Internal(EMaterialProperty InProperty,
+ 			Active = RendererSettings && RendererSettings->bEnableStrata;
+ 			break;
+ 		}
++
++		// CUSTOMDATA2 RETROREFLECTIVITY
++	//case MP_CustomData2 :
++	//Active = ShadingModels.HasAnyShadingModel({ MSM_RetroReflective });
++	//break;
++
+ 	case MP_MaterialAttributes:
+ 	default:
+ 		Active = true;
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp
+index 78ff76e704c..d3e022fada9 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp
+@@ -5759,6 +5759,7 @@ int32 UMaterialExpressionMakeMaterialAttributes::Compile(class FMaterialCompiler
+ 	case MP_PixelDepthOffset: Ret = PixelDepthOffset.Compile(Compiler); Expression = PixelDepthOffset.Expression; break;
+ 	case MP_ShadingModel: Ret = ShadingModel.Compile(Compiler); Expression = ShadingModel.Expression; break;
+ 	case MP_FrontMaterial: Ret = FrontMaterial.Compile(Compiler); Expression = FrontMaterial.Expression; break;
++	//case MP_CustomData2: Ret = RetroreflectionIntensity.Compile(Compiler); Expression = RetroreflectionIntensity.Expression; break;
+ 	};
+ 
+ 	if (Property >= MP_CustomizedUVs0 && Property <= MP_CustomizedUVs7)
+@@ -5871,6 +5872,7 @@ UMaterialExpressionBreakMaterialAttributes::UMaterialExpressionBreakMaterialAttr
+ 	Outputs.Add(FExpressionOutput(TEXT("PixelDepthOffset"), 1, 1, 0, 0, 0));
+ 	Outputs.Add(FExpressionOutput(TEXT("ShadingModel"), 0, 0, 0, 0, 0));
+ 	Outputs.Add(FExpressionOutput(TEXT("FrontMaterial"), 0, 0, 0, 0, 0));
++	//Outputs.Add(FExpressionOutput(TEXT("Retroreflectionintensity"), 1, 1, 0, 0, 0));
+ #endif
+ }
+ 
+@@ -5912,7 +5914,8 @@ void UMaterialExpressionBreakMaterialAttributes::Serialize(FStructuredArchive::F
+ 		}
+ 
+ 		Outputs[OutputIndex].SetMask(1, 1, 0, 0, 0); ++OutputIndex;// PixelDepthOffset
+-		Outputs[OutputIndex].SetMask(0, 0, 0, 0, 0); // ShadingModelFromMaterialExpression
++		Outputs[OutputIndex].SetMask(0, 0, 0, 0, 0); //++OutputIndex; // ShadingModelFromMaterialExpression 
++		//Outputs[OutputIndex].SetMask(1, 1, 0, 0, 0);  //Retroreflection Intensity
+ 	}
+ #endif // WITH_EDITOR
+ }
+@@ -5953,6 +5956,7 @@ static void BuildPropertyToIOIndexMap()
+ 		PropertyToIOIndexMap.Add(MP_PixelDepthOffset,		26);
+ 		PropertyToIOIndexMap.Add(MP_ShadingModel,			27);
+ 		PropertyToIOIndexMap.Add(MP_FrontMaterial,			28);
++		//PropertyToIOIndexMap.Add(MP_CustomData2,			29);
+ 	}
+ }
+ 
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialInterface.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialInterface.cpp
+index 7af70630d9b..d6180b2cc08 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialInterface.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialInterface.cpp
+@@ -190,7 +190,7 @@ FMaterialRelevance UMaterialInterface::GetRelevance_Internal(const UMaterial* Ma
+ 
+ 		// Note that even though XX_GameThread() api is called, this function can be called on non game thread via 
+ 		// GetRelevance_Concurrent()
+-		bool bUsesAnisotropy = MaterialResource->GetShadingModels().HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat }) && 
++		bool bUsesAnisotropy = MaterialResource->GetShadingModels().HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat, MSM_RetroReflective }) &&
+ 			MaterialResource->MaterialUsesAnisotropy_GameThread();
+ 
+ 		const EBlendMode BlendMode = (EBlendMode)GetBlendMode();
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialShader.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialShader.cpp
+index 5d81ac79949..772db0ee462 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialShader.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialShader.cpp
+@@ -81,6 +81,9 @@ FString GetShadingModelString(EMaterialShadingModel ShadingModel)
+ 		case MSM_Eye:				ShadingModelName = TEXT("MSM_Eye"); break;
+ 		case MSM_SingleLayerWater:	ShadingModelName = TEXT("MSM_SingleLayerWater"); break;
+ 		case MSM_ThinTranslucent:	ShadingModelName = TEXT("MSM_ThinTranslucent"); break;
++		case MSM_RetroReflective:	ShadingModelName = TEXT("MSM_RetroReflective"); break;
++		case MSM_Lit_Orennayar:		ShadingModelName = TEXT("MSM_Lit_Orennayar"); break;
++		case MSM_Lit_Gotanda:		ShadingModelName = TEXT("MSM_Lit_Gotanda"); break;
+ 		default: ShadingModelName = TEXT("Unknown"); break;
+ 	}
+ 	return ShadingModelName;
+@@ -208,7 +211,7 @@ void UpdateMaterialShaderCompilingStats(const FMaterial* Material)
+ 	{
+ 		INC_DWORD_STAT_BY(STAT_ShaderCompiling_NumUnlitMaterialShaders, 1);
+ 	}
+-	else if (ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_Subsurface, MSM_PreintegratedSkin, MSM_ClearCoat, MSM_Cloth, MSM_SubsurfaceProfile, MSM_TwoSidedFoliage, MSM_SingleLayerWater, MSM_ThinTranslucent }))
++	else if (ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_Subsurface, MSM_PreintegratedSkin, MSM_ClearCoat, MSM_Cloth, MSM_SubsurfaceProfile, MSM_TwoSidedFoliage, MSM_SingleLayerWater, MSM_ThinTranslucent, MSM_RetroReflective, MSM_Lit_Orennayar, MSM_Lit_Gotanda }))
+ 	{
+ 		INC_DWORD_STAT_BY(STAT_ShaderCompiling_NumLitMaterialShaders, 1);
+ 	}
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialShared.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialShared.cpp
+index 7a296df956a..e7cd1c42ebe 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialShared.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialShared.cpp
+@@ -4166,6 +4166,7 @@ void FMaterialAttributeDefinitionMap::InitializeAttributeMap()
+ 	Add(FGuid(0x0AC97EC3, 0xE3D047BA, 0xB610167D, 0xC4D919FF), TEXT("PixelDepthOffset"),		MP_PixelDepthOffset,		MCT_Float,	FVector4(0,0,0,0),	SF_Pixel);
+ 	Add(FGuid(0xD9423FFF, 0xD77E4D82, 0x8FF9CF5E, 0x055D1255), TEXT("ShadingModel"),			MP_ShadingModel,			MCT_ShadingModel, FVector4(0, 0, 0, 0), SF_Pixel, INDEX_NONE, false, &CompileShadingModelBlendFunction);
+ 	Add(FGuid(0x5973A03E, 0x13A74E08, 0x92D0CEDD, 0xF2936CF8), TEXT("FrontMaterial"),			MP_FrontMaterial,			MCT_Strata, FVector4(0,0,0,0),	SF_Pixel, INDEX_NONE, false, &CompileStrataBlendFunction);
++	//Add(FGuid(0xD2033FFF, 0xE6DA21BD, 0xD0472FFB, 0xC4D13370), TEXT("RetroreflectionIntensity"), MP_CustomData2,			MCT_Float,	FVector4(.1, 0, 0, 0), SF_Pixel);
+ 
+ 	// Used when compiling material with execution pins, which are compiling all attributes together
+ 	Add(FGuid(0xE0ED040B, 0x82794D93, 0xBD2D59B2, 0xA5BBF41C), TEXT("MaterialAttributes"),		MP_MaterialAttributes,		MCT_MaterialAttributes, FVector4(0,0,0,0), SF_Pixel, INDEX_NONE, bHideAttribute);
+@@ -4290,10 +4291,12 @@ FText FMaterialAttributeDefinitionMap::GetAttributeOverrideForMaterial(const FGu
+ 		CustomPinNames.Add({MSM_Hair, "Backlit"});
+ 		CustomPinNames.Add({MSM_Cloth, "Cloth"});
+ 		CustomPinNames.Add({MSM_Eye, "Iris Mask"});
++		CustomPinNames.Add({ MSM_RetroReflective, "Retroreflection Mask" });
+ 		return FText::FromString(GetPinNameFromShadingModelField(Material->GetShadingModels(), CustomPinNames, "Custom Data 0"));
+ 	case MP_CustomData1:
+ 		CustomPinNames.Add({ MSM_ClearCoat, "Clear Coat Roughness" });
+ 		CustomPinNames.Add({MSM_Eye, "Iris Distance"});
++		CustomPinNames.Add({ MSM_RetroReflective, "Retroreflection Depth" });
+ 		return FText::FromString(GetPinNameFromShadingModelField(Material->GetShadingModels(), CustomPinNames, "Custom Data 1"));
+ 	case MP_AmbientOcclusion:
+ 		return LOCTEXT("AmbientOcclusion", "Ambient Occlusion");
+@@ -4321,6 +4324,11 @@ FText FMaterialAttributeDefinitionMap::GetAttributeOverrideForMaterial(const FGu
+ 		return LOCTEXT("ShadingModel", "Shading Model");
+ 	case MP_FrontMaterial:
+ 		return LOCTEXT("FrontMaterial", "Front Material");
++
++	//case MP_CustomData2:
++		//CustomPinNames.Add({ MSM_RetroReflective, "Retroreflection Intensity" });
++		//return FText::FromString(GetPinNameFromShadingModelField(Material->GetShadingModels(), CustomPinNames, "Custom Data 2"));
++
+ 	case MP_CustomOutput:
+ 		return FText::FromString(GetAttributeName(AttributeID));
+ 		
+diff --git a/Engine/Source/Runtime/Engine/Public/MaterialExpressionIO.h b/Engine/Source/Runtime/Engine/Public/MaterialExpressionIO.h
+index 742a67564e5..68ebd04de0c 100644
+--- a/Engine/Source/Runtime/Engine/Public/MaterialExpressionIO.h
++++ b/Engine/Source/Runtime/Engine/Public/MaterialExpressionIO.h
+@@ -292,7 +292,7 @@ struct FMaterialAttributesInput : FExpressionInput
+ 	: PropertyConnectedBitmask(0)
+ 	{ 
+ 		// ensure PropertyConnectedBitmask can contain all properties.
+-		static_assert((uint32)(MP_MAX)-1 <= (8 * sizeof(PropertyConnectedBitmask)), "PropertyConnectedBitmask cannot contain entire EMaterialProperty enumeration.");
++		static_assert((uint32)(MP_MAX)-1 <= (8 * sizeof(PropertyConnectedBitmask)), "PropertyConnectedBitmask cannot contain entire EMaterialProperty enumeration. I'm a dumb fuck Epic employee who can't specify more error information");
+ 	}
+ 
+ #if WITH_EDITOR
+diff --git a/Engine/Source/Runtime/Engine/Public/SceneTypes.h b/Engine/Source/Runtime/Engine/Public/SceneTypes.h
+index 07b76764927..e12580c81db 100644
+--- a/Engine/Source/Runtime/Engine/Public/SceneTypes.h
++++ b/Engine/Source/Runtime/Engine/Public/SceneTypes.h
+@@ -182,7 +182,7 @@ enum EMaterialProperty
+ 	MP_PixelDepthOffset UMETA(Hidden),
+ 	MP_ShadingModel UMETA(Hidden),
+ 	MP_FrontMaterial UMETA(Hidden),
+-
++	//MP_CustomData2 UMETA(DisplayName = "Retroreflective Intensity"),
+ 	//^^^ New material properties go above here ^^^^
+ 	MP_MaterialAttributes UMETA(Hidden),
+ 	MP_CustomOutput UMETA(Hidden),
