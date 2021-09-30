@@ -175,6 +175,19 @@ float3 SpecularGGX( float Roughness, float3 SpecularColor, BxDFContext Context, 
 	return (D * Vis) * F;
 }
 
+float3 SpecularGRX( float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight )
+{
+	float a2 = Pow4( Roughness );
+	float Energy = EnergyNormalization( a2, Context.VoH, AreaLight );
+	
+	// Generalized microfacet specular
+	float D = D_GGX( a2, Context.VoL ) * Energy;
+	float Vis = Vis_SmithJointApprox( a2, Context.NoV, NoL );
+	float3 F = F_Schlick( SpecularColor, Context.VoH );
+
+	return (D * Vis) * F;
+}
+
 float3 DualSpecularGGX(float AverageRoughness, float Lobe0Roughness, float Lobe1Roughness, float LobeMix, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
 {
 	float AverageAlpha2 = Pow4(AverageRoughness);
