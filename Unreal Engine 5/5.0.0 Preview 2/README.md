@@ -15,12 +15,20 @@ Future versions will include integrations into the cloth and eye shading models.
 Changes:
 
 Updated to support Unreal Engine 5.0 Preview 2
+
 Fixed issue of material turning black if roughness value was above 0.99
+
 Fixed cooking crash when using the custom retroreflective shading model
+
 Integrated retroreflections into default lit shading model
+
 Deprecated retroreflective shading model
+
 Changed retroreflective specular reflectance model to GTR (Generalized Trowbridge-Reitz) as opposed to GGX (generalized anisotropic GGX)
+
 Changed retroreflective specular reflectance fresnel model to Schlick-Gaussian (spherical guassian term)
+
 Added bool and switch to default lit to enable/disable the retroreflection specular terms if the retroreflection mask input == 0
+
 Added depth fade to the retroreflection specular term (set in ShadingModelsMaterial.ush)
 
