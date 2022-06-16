@@ -10,7 +10,8 @@ Integrated retroreflections into the default lit shading model!
 
 **Changes:**
 
-- Updated to support Unreal Engine 5.0 Preview 2
+- Tested fully working on Unreal Engine 5.0.2
+- Updated to support Unreal Engine 5.0 Preview 2 -- Also supports 5.0.X
 - Fixed issue of material turning black if roughness value was above 0.99
 - Fixed cooking crash when using the custom retroreflective shading model
 - Integrated retroreflections into default lit shading model
@@ -24,18 +25,18 @@ Integrated retroreflections into the default lit shading model!
 **Supported Engine Versions**
 - *4.26.X*
 - *5.0.0 Early Access 1 & 2*
-- *5.0.0 Preview 2*
+- *5.0.X*
 
 
 **Pick the one thats right for you:**  
 You have two options to choose from currently,  
 - **Option A**: A single shader file (ShadingModels.ush) that you can drop in to  any binary or source version of Unreal Engine for retroreflections. This comes with the caveat of replacing Clear Coat though.
 - **Option B**: Use the custom shading model patch file. This requires a custom source build of Unreal Eninge 4 or 5, but doesn't replace any current shading models.
-
-**Installation:**
-
+  
+**Installation:**  
+  
 **Option A Installation:**  
-*Not available for 5.0.0 Preview 2*  
+*Not available for 5.0.X*  
 Navigate to the directory in this repository corrosponding to the engine version you wish to add the shader to.  
 Once there in the "Drop In" folder you should find a single file called "ShadingModels.ush", download this.  
 Open your Unreal Engine 4/5 installation directory and browse to **"Engine/Shaders/Private**  
@@ -55,7 +56,7 @@ Once there in the "Custom Shading Model" folder you should find a single file en
 
 **For 4.26/5.0EA:**  
 You must set the material to "Retro-reflective" and you should now see 2 new custom pins on the material output node called "Retroreflection Mask" & "Retroreflection Depth".  
-**For 5.0 Preview 2:**  
+**For 5.0:**  
 You must set the material to "Default Lit" and you should now see 2 new custom pins on the material output node called "Retroreflection Mask" & "Retroreflection Depth".  
 
 The Depth output now controls both a mix of how much light is reflected back and the color intensity. I will be splitting them off soon.  
