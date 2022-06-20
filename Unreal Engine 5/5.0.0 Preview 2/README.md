@@ -1,4 +1,4 @@
-This patch file is only for Unreal Engine 5.0 Preview 2 pulled from the **EpicGames/UnrealEngine** repository on the **5.0** branch.
+This patch file is only for Unreal Engine 5.0.X pulled from the **EpicGames/UnrealEngine** repository on the **release** branch. It is not guaranteed to work with the **ue5-main** branch and likely will not. Once 5.1 comes out I will be porting this over to strata.  
 
 Version: **0.4.1**
 
