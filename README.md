@@ -11,6 +11,7 @@ Integrated retroreflections into the default lit shading model!
 **Changes:**
 
 - Tested fully working on Unreal Engine 5.0.2
+- Tested on versions 4.24.X through 4.27.X
 - Updated to support Unreal Engine 5.0 Preview 2 -- Also supports 5.0.X
 - Fixed issue of material turning black if roughness value was above 0.99
 - Fixed cooking crash when using the custom retroreflective shading model
@@ -22,10 +23,13 @@ Integrated retroreflections into the default lit shading model!
 - Added depth fade to the retroreflection specular term (set in ShadingModelsMaterial.ush)
 
 
-**Supported Engine Versions**
-- *4.26.X*
+**Supported Engine Versions (Tested)**
+- *4.24.X - 4.27.X*
 - *5.0.0 Early Access 1 & 2*
-- *5.0.X*
+- *5.0.X*   
+  
+**Note:**  
+This will not work on the 5.1 (ue5-main) branch, it is only for 5.0.X or 4.24.X - 4.27.X. When 5.1 officially releases, I will upload a strata version I am working on for that version of the engine.
 
 
 **Pick the one thats right for you:**  
@@ -56,7 +60,7 @@ Once there in the "Custom Shading Model" folder you should find a single file en
 
 **For 4.26/5.0EA:**  
 You must set the material to "Retro-reflective" and you should now see 2 new custom pins on the material output node called "Retroreflection Mask" & "Retroreflection Depth".  
-**For 5.0:**  
+**For 5.0.X:**  
 You must set the material to "Default Lit" and you should now see 2 new custom pins on the material output node called "Retroreflection Mask" & "Retroreflection Depth".  
 
 The Depth output now controls both a mix of how much light is reflected back and the color intensity. I will be splitting them off soon.  
@@ -68,6 +72,10 @@ The "Retroreflection Mask" output is where you plug in your mask, so you can mas
 The 4.26 and 5.0 EA patch/shading model versions are very early work still, and very messy. They also add 2 extra shading models for alternative diffuse shading methods. You can tweak these yourself, but they will be removed in the next version, if there is a next version as a custom shading model.  
 ~~I am currently looking into a plugin + drop in shader solution that would allow you to place a single output expression in your material graph to add the functionality.~~  
   
+**Buy me a coffee:**  
+It's hard to find time to work on things like this when I'm always working, every little bit helps me take some time off to pursue projects like this one.  
+[Donate Here](https://www.paypal.com/donate/?business=EBGESZTTUVHP4&no_recurring=0&currency_code=USD)  
+  
 **Credits:**  
-William Schilthuis for the original UE4 retroreflective shading model I used as the base for the original version and for inspiring me to write my own.  
+William Schilthuis for the original UE4 retroreflective shading model for inspiring me to write my own.  
 https://williamgs.com/posts/unreal-retro-reflective-shading-model/  
