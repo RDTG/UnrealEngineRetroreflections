@@ -12,7 +12,7 @@ Integrated retroreflections into the default lit shading model!
 
 - Initial port to Unreal Engine 5.6
 - Reworked C++ portion of shading model and material node setup
-- Added custom 'Retroreflection' output node (Uses packed 3-vector; Red = Mask, Green = Depth, Blue = Intensity)
+- Added custom 'Retroreflection' output node (Uses packed 3-vector; Red = Mask, Green = Depth, Blue = Falloff Intensity)
 - Reworked falloff using new math to improve both distance and shallow angle falloff
 
 
@@ -64,7 +64,7 @@ You must set the material to "Default Lit". Similar to 5.0.x this will give you 
 
 The depth output controls falloff intensity, and the mask output is for masking out the retroreflections.  
   
-A new 'Retroreflection' standalone output node similar to the 'Bent Normal' output node was added in this version as well. You can use this in place of the standard output nodes above, but you must output a 3 vector with retroreflection mask in the red channel, depth in the green channel, and overall intensity in the blue channel.   
+A new 'Retroreflection' standalone output node similar to the 'Bent Normal' output node was added in this version as well. You can use this in place of the standard output nodes above, but you must output a 3 vector with retroreflection mask in the red channel, depth in the green channel, and falloff intensity in the blue channel.   
   
 **NOTE:**
 The 4.26 and 5.0 EA patch/shading model versions are very early work still, and very messy. They also add 2 extra shading models for alternative diffuse shading methods. You can tweak these yourself, but they will be removed in the next version, if there is a next version as a custom shading model.  
