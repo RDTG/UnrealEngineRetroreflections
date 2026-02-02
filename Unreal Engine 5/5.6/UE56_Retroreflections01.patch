@@ -1,0 +1,3273 @@
+diff --git a/Engine/Config/BaseEngine.ini b/Engine/Config/BaseEngine.ini
+index 0aa85532dedb..13948b3b561b 100644
+--- a/Engine/Config/BaseEngine.ini
++++ b/Engine/Config/BaseEngine.ini
+@@ -2084,7 +2084,7 @@ AutoSaveIndex=0
+ bAllowCompilingThroughWorkers=True
+ bAllowAsynchronousShaderCompiling=True
+ ; Make sure we don't starve loading threads
+-NumUnusedShaderCompilingThreads=3
++NumUnusedShaderCompilingThreads=4
+ ; Make sure the game has enough cores available to maintain reasonable performance
+ NumUnusedShaderCompilingThreadsDuringGame=4
+ ; Core count threshold.  Below this amount will use NumUnusedShaderCompilingThreads.  Above this threshold will use PercentageUnusedShaderCompilingThreads when determining the number of cores to reserve.
+@@ -2105,7 +2105,7 @@ WorkerTimeToLive=20
+ ; For build machines, wait this many seconds before exiting an unused worker (float value)
+ BuildWorkerTimeToLive=1200
+ ; Set process priority for ShaderCompileWorker (0 is normal)
+-WorkerProcessPriority=-1
++WorkerProcessPriority=1
+ 
+ ; These values are for build machines only currently to reduce the number of SCWs spawned to reduce memory pressure
+ bUseVirtualCores = False
+@@ -3123,7 +3123,9 @@ SceneDepth=(Material="/Engine/BufferVisualization/SceneDepth.SceneDepth", Name=L
+ SeparateTranslucencyRGB=(Material="/Engine/BufferVisualization/SeparateTranslucencyRGB.SeparateTranslucencyRGB", Name=LOCTEXT("BaseSeparateTranslucencyRGBMat", "Separate Translucency RGB"), ApplyAutoExposure=true)
+ SeparateTranslucencyA=(Material="/Engine/BufferVisualization/SeparateTranslucencyA.SeparateTranslucencyA", Name=LOCTEXT("BaseSeparateTranslucencyAMat", "Separate Translucency Alpha"))
+ Specular=(Material="/Engine/BufferVisualization/Specular.Specular", Name=LOCTEXT("BaseSpecularMat", "Specular"))
++SpecularColor=(Material="/Engine/BufferVisualization/SpecularColor.SpecularColor", Name=LOCTEXT("BaseSpecularColorMat", "SpecularColor"))
+ SubsurfaceColor=(Material="/Engine/BufferVisualization/SubsurfaceColor.SubsurfaceColor", Name=LOCTEXT("BaseSubsurfaceColorMat", "Subsurface Color"))
++Retroreflections=(Material="/Engine/BufferVisualization/Retroreflections.Retroreflections", Name=LOCTEXT("BaseRetroreflectionsColorMat", "Retroreflections"))
+ WorldNormal=(Material="/Engine/BufferVisualization/WorldNormal.WorldNormal", Name=LOCTEXT("BaseWorldNormalMat", "World Normal"))
+ WorldTangent=(Material="/Engine/BufferVisualization/WorldTangent.WorldTangent", Name=LOCTEXT("BaseWorldTangentMat", "World Tangent"))
+ AmbientOcclusion=(Material="/Engine/BufferVisualization/AmbientOcclusion.AmbientOcclusion", Name=LOCTEXT("BaseAmbientOcclusionMat", "Ambient Occlusion"))
+@@ -3845,16 +3847,19 @@ SendOSData=true
+ ; APIEndpointET="api/v1/telemetry/engine"
+ 
+ ; Example Horde UBA Distribution Settings - See Engine/Source/Programs/UnrealBuildTool/Executors/UnrealBuildAccelerator/UnrealBuildAcceleratorHordeConfig.cs
+-;[UbaController]
+-; +BuildMachineProviders=Uba.Provider.Horde.BuildMachine ; Providers for build machines
++[UbaController]
++Enabled=true
++bForceRemote=true
+++BuildMachineProviders=Uba.Provider.Horde.BuildMachine
+ ; +Providers=Uba.Provider.Horde.MyOwnHordeServer ; Example to add multiple horde providers
+ ; +Providers=Uba.Provider.Horde.MyOwnHordeServer2
+-;[Uba.Provider.Horde] ; Default settings for all users. It's not recommended to automatically enable all users
+-; Enabled=False ; Disable distribution by default
+-;[Uba.Provider.Horde.BuildMachine]
+-; ServerUrl="https://myownhordeserver.com/"
+-; Pool=MyBuildMachineUbaPool
+-; Enabled=BuildMachineOnly ; Enable distribution only for build machines
++[Uba.Provider.Horde]
++Enabled=True
++[Uba.Provider.Horde.BuildMachine]
++ ServerUrl="http://localhost:5000"
++ Pool=Win-UE5-GPU
++ Enabled=True
++ bForceRemote=true
+ ;[Uba.Provider.Horde.MyOwnHordeServer]
+ ; ServerUrl="https://myownhordeserver.com/"
+ ; Pool=MyUbaPool
+@@ -3873,10 +3878,10 @@ SendOSData=true
+ ; Url=myowncacheserver:1347 ; Required
+ ; Write=BuildMachineOnly ; Optional: Only allow build machines to write to this cache. Writing is disabled by default
+ ; RequireVFS=True ; Optional: Requires a UnrealBuildTool action have VFS enabled to maintain consistent pathing. Not required by default
+-;[Uba.CacheProvider.Uba.LocalHost]
+-; Url=127.0.0.1:1347
+-; Write=True
+-; RequireVFS=False
++[Uba.CacheProvider.Uba.LocalHost]
++Url=127.0.0.1:1347
++Write=True
++RequireVFS=False
+ 
+ [/Script/Engine.WorldPartitionSettings]
+ EditorHashDefaultClass=/Script/CoreUObject.Class'/Script/Engine.WorldPartitionEditorSpatialHash'
+diff --git a/Engine/Config/BaseMaterialExpressions.ini b/Engine/Config/BaseMaterialExpressions.ini
+index 5d650272448a..b1d622bf86d5 100644
+--- a/Engine/Config/BaseMaterialExpressions.ini
++++ b/Engine/Config/BaseMaterialExpressions.ini
+@@ -3,6 +3,10 @@
+ [/Script/Engine.MaterialExpressionBentNormalCustomOutput]
+ +MenuCategories=NSLOCTEXT("MaterialExpression", "Utility", "Utility")
+ 
++// RDTG
++[Script/Engine.MaterialExpressionRetroreflectionCustomOutput]
+++MenuCategories=NSLOCTEXT("MaterialExpression", "Utility", "Utility")
++
+ [/Script/Engine.MaterialExpressionClearCoatNormalCustomOutput]
+ +MenuCategories=NSLOCTEXT("MaterialExpression", "Utility", "Utility")
+ 
+diff --git a/Engine/Config/ConsoleVariables.ini b/Engine/Config/ConsoleVariables.ini
+index 62fc7270852f..1d8cc325667d 100644
+--- a/Engine/Config/ConsoleVariables.ini
++++ b/Engine/Config/ConsoleVariables.ini
+@@ -33,7 +33,7 @@
+ 
+ 
+ ; Uncomment to get detailed logs on shader compiles and the opportunity to retry on errors, and enable showing shader warnings
+-;r.ShaderDevelopmentMode=1
++r.ShaderDevelopmentMode=1
+ 
+ ; Dump shaders in the Saved folder
+ ;  Mode 1: dump all. WARNING: leaving this on for a while will fill your hard drive with many small files and folders.
+diff --git a/Engine/Plugins/Editor/MaterialAnalyzer/Source/Private/SMaterialAnalyzer.cpp b/Engine/Plugins/Editor/MaterialAnalyzer/Source/Private/SMaterialAnalyzer.cpp
+index 2781f566cf7d..04559afb644a 100644
+--- a/Engine/Plugins/Editor/MaterialAnalyzer/Source/Private/SMaterialAnalyzer.cpp
++++ b/Engine/Plugins/Editor/MaterialAnalyzer/Source/Private/SMaterialAnalyzer.cpp
+@@ -53,6 +53,8 @@ SMaterialAnalyzer::SMaterialAnalyzer()
+ 	BasePropertyOverrideNames.Add(TEXT("bOverride_DisplacementFadeRange"), TEXT("DisplacementFadeRange"));
+ 	BasePropertyOverrideNames.Add(TEXT("bOverride_MaxWorldPositionOffsetDisplacement"), TEXT("MaxWorldPositionOffsetDisplacement"));
+ 	BasePropertyOverrideNames.Add(TEXT("bOverride_CompatibleWithLumenCardSharing"), TEXT("bCompatibleWithLumenCardSharing"));
++// RDTG
++	BasePropertyOverrideNames.Add(TEXT("bOverride_bHasRetroreflections"), TEXT("bHasRetroreflectionsOverride"));
+ }
+ 
+ SMaterialAnalyzer::~SMaterialAnalyzer()
+diff --git a/Engine/Shaders/Private/AmbientCubemapComposite.usf b/Engine/Shaders/Private/AmbientCubemapComposite.usf
+index 5d99c20a0108..5c63b8f45550 100644
+--- a/Engine/Shaders/Private/AmbientCubemapComposite.usf
++++ b/Engine/Shaders/Private/AmbientCubemapComposite.usf
+@@ -569,7 +569,7 @@ void MainPS(in noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPositio
+ 	float AmbientOcclusion = GBuffer.GBufferAO * AmbientOcclusionTexture.SampleLevel(AmbientOcclusionSampler, BufferUV, 0).r;
+ 
+ 	// Subsurface
+-	BRANCH if(GBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE || GBuffer.ShadingModelID == SHADINGMODELID_PREINTEGRATED_SKIN)
++	BRANCH if(GBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE || GBuffer.ShadingModelID == SHADINGMODELID_PREINTEGRATED_SKIN || GBuffer.ShadingModelID == SHADINGMODELID_RETROREFLECTIVE)
+ 	{
+ 		// some view dependent and some non view dependent (hard coded)
+ 		float DependentSplit = 0.5f;
+diff --git a/Engine/Shaders/Private/BRDF.ush b/Engine/Shaders/Private/BRDF.ush
+index b8585d24993a..e20e12757e6e 100644
+--- a/Engine/Shaders/Private/BRDF.ush
++++ b/Engine/Shaders/Private/BRDF.ush
+@@ -13,6 +13,8 @@ struct BxDFContext
+ 	half VoL;
+ 	half NoH;
+ 	half VoH;
++	half VoN;
++	half LoH;
+ 	half XoV;
+ 	half XoL;
+ 	half XoH;
+@@ -26,6 +28,9 @@ void Init( inout BxDFContext Context, half3 N, half3 V, half3 L )
+ 	Context.NoL = dot(N, L);
+ 	Context.NoV = dot(N, V);
+ 	Context.VoL = dot(V, L);
++	Context.VoN = dot(V, N);
++	float3 H = normalize(float3(V + L));
++	Context.LoH = saturate(dot(L,H));
+ 	float InvLenH = rsqrt( 2 + 2 * Context.VoL );
+ 	Context.NoH = saturate( ( Context.NoL + Context.NoV ) * InvLenH );
+ 	Context.VoH = saturate( InvLenH + InvLenH * Context.VoL );
+@@ -45,6 +50,9 @@ void Init( inout BxDFContext Context, half3 N, half3 X, half3 Y, half3 V, half3
+ 	Context.NoL = dot(N, L);
+ 	Context.NoV = dot(N, V);
+ 	Context.VoL = dot(V, L);
++	Context.VoN = dot(V, N);
++	float3 H = normalize(float3(V + L));
++	Context.LoH = saturate(dot(L,H));
+ 	float InvLenH = rsqrt( 2 + 2 * Context.VoL );
+ 	Context.NoH = saturate( ( Context.NoL + Context.NoV ) * InvLenH );
+ 	Context.VoH = saturate( InvLenH + InvLenH * Context.VoL );
+@@ -64,10 +72,11 @@ void InitMobile(inout BxDFContext Context, half3 N, half3 V, half3 L, half NoL)
+ 	Context.NoL = NoL;
+ 	Context.NoV = dot(N, V);
+ 	Context.VoL = dot(V, L);
++	Context.VoN = dot(V, N);
+ 	float3 H = normalize(float3(V + L));
+ 	Context.NoH = max(0, dot(N, H));
+ 	Context.VoH = max(0, dot(V, H));
+-
++	Context.LoH = saturate(dot(L,H));
+ 	//NoL = saturate( NoL );
+ 	//NoV = saturate( abs( NoV ) + 1e-5 );
+ 
+@@ -265,6 +274,25 @@ float3 Diffuse_Chan( float3 DiffuseColor, float a2, float NoV, float NoL, float
+ 	return DiffuseColor * Lobe;
+ }
+ 
++float D_BlinnModified( float a2, float NoH )
++{
++	float d = 2 / a2 - 2;
++	return (d+1) / (2*PI) * PhongShadingPow( NoH, d );        // 1 mad, 1 exp, 1 mul, 1 log
++}
++
++float D_BlinnModifiedRetro ( float a2, float VoL )
++{
++	float d = 2 / a2 - 2;
++	return (d+1) / (2*PI) * PhongShadingPow( VoL, d );        // 1 mad, 1 exp, 1 mul, 1 log
++}
++
++// [Blinn 1977, "Models of light reflection for computer synthesized pictures"] - Modified for retroreflections (Use as additive retro calculations ONLY!!!!!!!!!)
++float D_BlinnRetro( float a2, float VoL )
++{
++	float n = 2 / a2 - 2;
++	return (n+2) / (2*PI) * PhongShadingPow( VoL, n );		// 1 mad, 1 exp, 1 mul, 1 log
++}
++
+ // [Blinn 1977, "Models of light reflection for computer synthesized pictures"]
+ float D_Blinn( float a2, float NoH )
+ {
+@@ -272,6 +300,18 @@ float D_Blinn( float a2, float NoH )
+ 	return (n+2) / (2*PI) * PhongShadingPow( NoH, n );		// 1 mad, 1 exp, 1 mul, 1 log
+ }
+ 
++//GGX/Walter 07 MODIFIED
++float D_G1_GGX(float a2, float NoV)
++{
++	return 2/(1 + sqrt(1 + a2*a2 * (1-NoV*NoV)/(NoV*NoV)));
++}
++
++//GGX/Walter 07 MODIFIED for retroreflections
++float D_G1_RRX(float a2, float VoL)
++{
++	return 2/(1 + sqrt(1 + a2*a2 * (1-VoL*VoL)/(VoL*VoL)));
++}
++
+ // [Beckmann 1963, "The scattering of electromagnetic waves from rough surfaces"]
+ float D_Beckmann( float a2, float NoH )
+ {
+@@ -287,6 +327,68 @@ float D_GGX( float a2, float NoH )
+ 	return a2 / ( PI*d*d );					// 4 mul, 1 rcp
+ }
+ 
++float D_GGXAlt ( float a2, float NoH )
++{
++	float alpha = a2 * a2;
++	float alphaSqr = alpha * alpha;
++	float denom = NoH * ( alphaSqr - 1 ) + 1.0f;
++
++	float D = alphaSqr / ( PI * denom * denom );
++	return D;
++}
++
++// GGX / Trowbridge-Reitz - Modified for retroreflections
++// [Walter et al. 2007, "Microfacet models for refraction through rough surfaces"]
++float D_RRX( float a2, float VoL )
++{
++	float d = ( VoL * a2 - VoL ) * VoL + 1;	// 2 mad
++	return a2 / ( PI*d*d );					// 4 mul, 1 rcp
++}
++
++// GGX / Trowbridge-Reitz - Modified for retroreflections
++// [Walter et al. 2007, "Microfacet models for refraction through rough surfaces"]
++float D_GRX( float a2, float NoH, float VoL )
++{
++	float d = ( VoL * a2 - VoL ) * NoH + 1;	// 2 mad
++	return a2 / ( PI*d*d );					// 4 mul, 1 rcp
++}
++
++float D_GTR1(float a2, float NoH)
++{
++	//float a2 = alpha * alpha;
++	float cos2th = NoH * NoH;
++	float den = (1.0 + (a2 - 1.0) * cos2th);
++
++	return (a2 - 1.0) / (PI * log(a2) * den);
++}
++
++float D_GTR2(float a2, float NoH)
++{
++	//float a2 = alpha * alpha;
++	float cos2th = NoH * NoH;
++	float den = (1.0 + (a2 - 1.0) * cos2th);
++
++	return a2 / (PI * den * den);
++}
++
++float D_RRGTR1(float a2, float VoL)
++{
++	//float a2 = alpha * alpha;
++	float cos2th = VoL * VoL;
++	float den = (1.0 + (a2 - 1.0) * cos2th);
++
++	return (a2 - 1.0) / (PI * log(a2) * den);
++}
++
++float D_RRGTR2(float a2, float VoL)
++{
++	//float a2 = alpha * alpha;
++	float cos2th = VoL * VoL;
++	float den = (1.0 + (a2 - 1.0) * cos2th);
++
++	return a2 / (PI * den * den);
++}
++
+ // Anisotropic GGX
+ // [Burley 2012, "Physically-Based Shading at Disney"]
+ float D_GGXaniso( float ax, float ay, float NoH, float XoH, float YoH )
+@@ -304,6 +406,12 @@ float D_GGXaniso( float ax, float ay, float NoH, float XoH, float YoH )
+ #endif
+ }
+ 
++// Neubelt and Pettineo 2013, "Crafting a Next-gen Material Pipeline for The Order: 1886"
++float V_Neubelt(float NoV, float NoL)
++{
++	return saturate(1.0 / (4.0 * (NoL + NoV - NoL * NoV)));
++}
++
+ float Vis_Implicit()
+ {
+ 	return 0.25;
+@@ -332,6 +440,13 @@ float Vis_Schlick( float a2, float NoV, float NoL )
+ 	return 0.25 / ( Vis_SchlickV * Vis_SchlickL );
+ }
+ 
++// Schlick Gaussian fresnel term.
++float3 F_SchlickGaussian(float3 SpecularColor, float VoH)
++{
++	float SphericalGaussian = pow(2.0, (-5.55473 * VoH - 6.98316) * VoH);
++	return SpecularColor + (float3(1.0, 1.0, 1.0) - SpecularColor) * SphericalGaussian;
++}
++
+ // Smith term for GGX
+ // [Smith 1967, "Geometrical shadowing of a random rough surface"]
+ float Vis_Smith( float a2, float NoV, float NoL )
+diff --git a/Engine/Shaders/Private/BasePassCommon.ush b/Engine/Shaders/Private/BasePassCommon.ush
+index 4b6279cbad73..43589386e56e 100644
+--- a/Engine/Shaders/Private/BasePassCommon.ush
++++ b/Engine/Shaders/Private/BasePassCommon.ush
+@@ -41,7 +41,7 @@
+ #define USES_GBUFFER						(FEATURE_LEVEL >= FEATURE_LEVEL_SM4 && (MATERIALBLENDING_SOLID || MATERIALBLENDING_MASKED) && !FORWARD_SHADING)
+ 
+ // Only some shader models actually need custom data.
+-#define WRITES_CUSTOMDATA_TO_GBUFFER		(USES_GBUFFER && (MATERIAL_SHADINGMODEL_SUBSURFACE || MATERIAL_SHADINGMODEL_PREINTEGRATED_SKIN || MATERIAL_SHADINGMODEL_SUBSURFACE_PROFILE || MATERIAL_SHADINGMODEL_CLEAR_COAT || MATERIAL_SHADINGMODEL_TWOSIDED_FOLIAGE || MATERIAL_SHADINGMODEL_HAIR || MATERIAL_SHADINGMODEL_CLOTH || MATERIAL_SHADINGMODEL_EYE))
++#define WRITES_CUSTOMDATA_TO_GBUFFER		(USES_GBUFFER && (MATERIAL_SHADINGMODEL_SUBSURFACE || MATERIAL_SHADINGMODEL_PREINTEGRATED_SKIN || MATERIAL_SHADINGMODEL_SUBSURFACE_PROFILE || MATERIAL_SHADINGMODEL_CLEAR_COAT || MATERIAL_SHADINGMODEL_TWOSIDED_FOLIAGE || MATERIAL_SHADINGMODEL_HAIR || MATERIAL_SHADINGMODEL_CLOTH || MATERIAL_SHADINGMODEL_EYE || MATERIAL_SHADINGMODEL_RETROREFLECTIVE))
+ 
+ // Based on GetPrecomputedShadowMasks()
+ // Note: WRITES_PRECSHADOWFACTOR_TO_GBUFFER is currently disabled because we use the precomputed shadow factor GBuffer outside of STATICLIGHTING_TEXTUREMASK to store UseSingleSampleShadowFromStationaryLights
+diff --git a/Engine/Shaders/Private/BasePassPixelShader.usf b/Engine/Shaders/Private/BasePassPixelShader.usf
+index 949695407947..c08b8f57fdea 100644
+--- a/Engine/Shaders/Private/BasePassPixelShader.usf
++++ b/Engine/Shaders/Private/BasePassPixelShader.usf
+@@ -812,6 +812,10 @@ uint GetSelectiveOutputMask()
+ 	uint Mask = 0;
+ #if MATERIAL_USES_ANISOTROPY && !IS_NANITE_PASS
+ 	Mask |= HAS_ANISOTROPY_MASK;
++#endif
++	// RDTG
++#if MATERIAL_HAS_RETROREFLECTIONS
++	Mask |= HAS_RETROREFLECTION_MASK;
+ #endif
+ #if !GBUFFER_HAS_PRECSHADOWFACTOR
+ 	Mask |= SKIP_PRECSHADOW_MASK;
+@@ -955,8 +959,8 @@ void FPixelShaderInOut_MainPS(
+ 	// 0..1, SubsurfaceProfileId = int(x * 255)
+ 	float SubsurfaceProfile = 0;
+ #if !SUBSTRATE_ENABLED
+-#if MATERIAL_SHADINGMODEL_SUBSURFACE || MATERIAL_SHADINGMODEL_PREINTEGRATED_SKIN || MATERIAL_SHADINGMODEL_SUBSURFACE_PROFILE || MATERIAL_SHADINGMODEL_TWOSIDED_FOLIAGE || MATERIAL_SHADINGMODEL_CLOTH || MATERIAL_SHADINGMODEL_EYE
+-	if (ShadingModel == SHADINGMODELID_SUBSURFACE || ShadingModel == SHADINGMODELID_PREINTEGRATED_SKIN || ShadingModel == SHADINGMODELID_SUBSURFACE_PROFILE || ShadingModel == SHADINGMODELID_TWOSIDED_FOLIAGE || ShadingModel == SHADINGMODELID_CLOTH || ShadingModel == SHADINGMODELID_EYE)
++#if MATERIAL_SHADINGMODEL_SUBSURFACE || MATERIAL_SHADINGMODEL_PREINTEGRATED_SKIN || MATERIAL_SHADINGMODEL_SUBSURFACE_PROFILE || MATERIAL_SHADINGMODEL_TWOSIDED_FOLIAGE || MATERIAL_SHADINGMODEL_CLOTH || MATERIAL_SHADINGMODEL_EYE || MATERIAL_SHADINGMODEL_RETROREFLECTIVE
++	if (ShadingModel == SHADINGMODELID_SUBSURFACE || ShadingModel == SHADINGMODELID_PREINTEGRATED_SKIN || ShadingModel == SHADINGMODELID_SUBSURFACE_PROFILE || ShadingModel == SHADINGMODELID_TWOSIDED_FOLIAGE || ShadingModel == SHADINGMODELID_CLOTH || ShadingModel == SHADINGMODELID_EYE || ShadingModel == SHADINGMODELID_RETROREFLECTIVE)
+ 	{
+ 		float4 SubsurfaceData = GetMaterialSubsurfaceData(PixelMaterialInputs);
+ 
+@@ -969,6 +973,12 @@ void FPixelShaderInOut_MainPS(
+ 			SubsurfaceColor = SubsurfaceData.rgb * View.DiffuseOverrideParameter.w + View.DiffuseOverrideParameter.xyz;
+ 		}
+ #endif
++#if MATERIAL_SHADINGMODEL_RETROREFLECTIVE
++		else if (ShadingModel == SHADINGMODELID_RETROREFLECTIVE)
++		{
++			SubsurfaceColor = SubsurfaceData.rgb;
++		}
++#endif
+ #if MATERIAL_SHADINGMODEL_CLOTH
+ 		else if (ShadingModel == SHADINGMODELID_CLOTH)
+ 		{
+@@ -1682,6 +1692,9 @@ void FPixelShaderInOut_MainPS(
+ 			SubstrateMaterialExport = Export.CustomData0;
+ 		#elif SUBSTRATE_MATERIAL_EXPORT_TYPE == SUBSTRATE_MATERIAL_EXPORT_CUSTOMDATA1
+ 			SubstrateMaterialExport = Export.CustomData1;
++	// RDTG
++		#elif SUBSTRATE_MATERIAL_EXPORT_TYPE == SUBSTRATE_MATERIAL_EXPORT_CUSTOMDATA2
++		SubstrateMaterialExport = Export.CustomData2;
+ 		#elif SUBSTRATE_MATERIAL_EXPORT_TYPE == SUBSTRATE_MATERIAL_EXPORT_SUBSURFACECOLOR
+ 			SubstrateMaterialExport = float4(Export.SubsurfaceColor, 1.0f);
+ 		#elif SUBSTRATE_MATERIAL_EXPORT_TYPE == SUBSTRATE_MATERIAL_EXPORT_TANGENT
+diff --git a/Engine/Shaders/Private/ClusteredDeferredShadingPixelShader.usf b/Engine/Shaders/Private/ClusteredDeferredShadingPixelShader.usf
+index ab378d2a0469..a88f0ece01c3 100644
+--- a/Engine/Shaders/Private/ClusteredDeferredShadingPixelShader.usf
++++ b/Engine/Shaders/Private/ClusteredDeferredShadingPixelShader.usf
+@@ -420,6 +420,7 @@ void ClusteredShadingPixelShader(
+ 	GET_LIGHT_GRID_LOCAL_LIGHTING_SINGLE_SM(SHADINGMODELID_CLOTH,				PixelShadingModelID, CompositedLighting, ScreenUV, CulledLightGridHeader, Dither);
+ 	GET_LIGHT_GRID_LOCAL_LIGHTING_SINGLE_SM(SHADINGMODELID_EYE,					PixelShadingModelID, CompositedLighting, ScreenUV, CulledLightGridHeader, Dither);
+ 	GET_LIGHT_GRID_LOCAL_LIGHTING_SINGLE_SM(SHADINGMODELID_SINGLELAYERWATER,	PixelShadingModelID, CompositedLighting, ScreenUV, CulledLightGridHeader, Dither);
++	GET_LIGHT_GRID_LOCAL_LIGHTING_SINGLE_SM(SHADINGMODELID_RETROREFLECTIVE, PixelShadingModelID, CompositedLighting, ScreenUV, CulledLightGridHeader, Dither);
+ 	// SHADINGMODELID_THIN_TRANSLUCENT - skipping because it can not be opaque
+ #else // !USE_PASS_PER_SHADING_MODEL
+ 	CompositedLighting += GetLightGridLocalLighting(GetScreenSpaceData(ScreenUV), CulledLightGridHeader, TranslatedWorldPosition, CameraVector, ScreenUV, SceneDepth, 0, Dither);
+diff --git a/Engine/Shaders/Private/DebugViewModePixelShader.usf b/Engine/Shaders/Private/DebugViewModePixelShader.usf
+index e48bcf2ca2d4..53d0d541f0d9 100644
+--- a/Engine/Shaders/Private/DebugViewModePixelShader.usf
++++ b/Engine/Shaders/Private/DebugViewModePixelShader.usf
+@@ -262,6 +262,9 @@ float4 VisualizeMaterialTexCoordScales(in FDebugPSIn DebugInputs, in bool bIsFro
+ 		half4 SSData = GetMaterialSubsurfaceDataRaw(PixelMaterialInputs);
+ 		float Custom0 = GetMaterialCustomData0(PixelMaterialInputs);
+ 		float Custom1 = GetMaterialCustomData1(PixelMaterialInputs);
++		// RDTG
++		//float Custom2 = GetMaterialCustomData2(PixelMaterialInputs);
++		//float Custom3 = GetMaterialCustomData3(PixelMaterialInputs);
+ 		float MaterialAO = GetMaterialAmbientOcclusionRaw(PixelMaterialInputs);
+ 		float PixelDepthOffset = GetMaterialPixelDepthOffset(PixelMaterialInputs);
+ #if CLEAR_COAT_BOTTOM_NORMAL && NUM_MATERIAL_OUTPUTS_CLEARCOATBOTTOMNORMAL > 0
+@@ -386,6 +389,8 @@ float4 VisualizeRequiredTextureResolution(in FDebugPSIn DebugInputs, in bool bIs
+ 		half4 SSData = GetMaterialSubsurfaceDataRaw(PixelMaterialInputs);
+ 		float Custom0 = GetMaterialCustomData0(PixelMaterialInputs);
+ 		float Custom1 = GetMaterialCustomData1(PixelMaterialInputs);
++		// RDTG
++		//float Custom2 = GetMaterialCustomData2(PixelMaterialInputs);
+ 		float MaterialAO = GetMaterialAmbientOcclusionRaw(PixelMaterialInputs);
+ 		float PixelDepthOffset = GetMaterialPixelDepthOffset(PixelMaterialInputs);
+ #if CLEAR_COAT_BOTTOM_NORMAL && NUM_MATERIAL_OUTPUTS_CLEARCOATBOTTOMNORMAL > 0
+diff --git a/Engine/Shaders/Private/DeferredShadingCommon.ush b/Engine/Shaders/Private/DeferredShadingCommon.ush
+index 5cb087ccf052..8d7e24473e4c 100644
+--- a/Engine/Shaders/Private/DeferredShadingCommon.ush
++++ b/Engine/Shaders/Private/DeferredShadingCommon.ush
+@@ -195,6 +195,12 @@ float3 EncodeSubsurfaceColor(float3 SubsurfaceColor)
+ 	return sqrt(saturate(SubsurfaceColor));
+ }
+ 
++float3 EncodeRetroreflectionColor(float3 RetroreflectionColor)
++{
++	// We probably don't want to saturate this directly, otherwise we can't use values over 1.f for things like RetroreflectionDepth.
++	return RetroreflectionColor;
++}
++
+ // @param SubsurfaceProfile 0..1, SubsurfaceProfileId = int(x * 255)
+ float3 EncodeSubsurfaceProfile(float SubsurfaceProfile)
+ {
+@@ -304,7 +310,8 @@ bool IsSubsurfaceModel(int ShadingModel)
+ 		|| ShadingModel == SHADINGMODELID_SUBSURFACE_PROFILE
+ 		|| ShadingModel == SHADINGMODELID_TWOSIDED_FOLIAGE
+ 		|| ShadingModel == SHADINGMODELID_HAIR
+-		|| ShadingModel == SHADINGMODELID_EYE;
++		|| ShadingModel == SHADINGMODELID_EYE
++		|| ShadingModel == SHADINGMODELID_RETROREFLECTIVE;
+ }
+ 
+ bool UseSubsurfaceProfile(int ShadingModel)
+@@ -321,7 +328,19 @@ bool HasCustomGBufferData(int ShadingModelID)
+ 		|| ShadingModelID == SHADINGMODELID_TWOSIDED_FOLIAGE
+ 		|| ShadingModelID == SHADINGMODELID_HAIR
+ 		|| ShadingModelID == SHADINGMODELID_CLOTH
+-		|| ShadingModelID == SHADINGMODELID_EYE;
++		|| ShadingModelID == SHADINGMODELID_EYE
++		|| ShadingModelID == SHADINGMODELID_RETROREFLECTIVE;
++}
++
++
++bool bIsRetroreflectiveSM(int ShadingModel)
++{
++	return ShadingModel == SHADINGMODELID_RETROREFLECTIVE;
++}
++
++bool HasRetroreflection(int SelectiveOutputMask)
++{
++	return (SelectiveOutputMask & HAS_RETROREFLECTION_MASK) != 0;
+ }
+ 
+ bool HasAnisotropy(int SelectiveOutputMask)
+@@ -624,6 +643,14 @@ void MobileEncodeGBuffer(
+ 			OutGBufferC.a = GBuffer.CustomData.y; // IrisNormal_Oct.x
+ 			OutGBufferB.g = GBuffer.CustomData.z; // IrisNormal_Oct.y
+ 		}
++		else if (GBuffer.ShadingModelID == SHADINGMODELID_RETROREFLECTIVE)
++		{
++			// encode Opacity into 6 bits and 4 bits for shading model
++			OutGBufferA.b = MobileEncodeIdAndColorChannel(GBuffer.ShadingModelID, GBuffer.CustomData.a, true);
++			OutGBufferB.a = GBuffer.CustomData.r; // SubsurfaceColor.R
++			OutGBufferC.a = GBuffer.CustomData.g; // SubsurfaceColor.G
++			OutGBufferB.r = GBuffer.CustomData.b; // SubsurfaceColor.B
++		}
+ 		else
+ 		{
+ 			// encode 4 bits for shading model
+diff --git a/Engine/Shaders/Private/Definitions.usf b/Engine/Shaders/Private/Definitions.usf
+index 2f8d2b6c7a4f..54c4dbd3bb8a 100644
+--- a/Engine/Shaders/Private/Definitions.usf
++++ b/Engine/Shaders/Private/Definitions.usf
+@@ -14,6 +14,11 @@
+ #define	MATERIAL_ISTHINSURFACE							0
+ #endif
+ 
++// RDTG
++#ifndef MATERIAL_HAS_RETROREFLECTIONS
++#define MATERIAL_HAS_RETROREFLECTIONS					0
++#endif
++
+ #ifndef MATERIAL_TANGENTSPACENORMAL
+ #define	MATERIAL_TANGENTSPACENORMAL						0
+ #endif
+@@ -105,6 +110,10 @@
+ #define MATERIAL_SHADINGMODEL_DEFAULT_LIT				0
+ #endif
+ 
++#ifndef MATERIAL_SHADINGMODEL_RETROREFLECTIVE
++#define MATERIAL_SHADINGMODEL_RETROREFLECTIVE			0
++#endif
++
+ #ifndef MATERIAL_SHADINGMODEL_SUBSURFACE
+ #define MATERIAL_SHADINGMODEL_SUBSURFACE				0
+ #endif
+@@ -254,6 +263,11 @@
+ #define SUPPORTS_ANISOTROPIC_MATERIALS					0
+ #endif
+ 
++// RDTG
++#ifndef SUPPORTS_RETROREFLECTIVE_MATERIALS
++#define SUPPORTS_RETROREFLECTIVE_MATERIALS					0
++#endif
++
+ #ifndef FORCE_MATERIAL_FLOAT_FULL_PRECISION
+ #define FORCE_MATERIAL_FLOAT_FULL_PRECISION             0
+ #endif
+@@ -306,6 +320,8 @@
+ #define SUBSTRATE_MATERIAL_EXPORT_TANGENT						15
+ #define SUBSTRATE_MATERIAL_EXPORT_SHADINGMODEL					16
+ #define SUBSTRATE_MATERIAL_EXPORT_MATERIAL_PREVIEW				17
++// RDTG
++#define SUBSTRATE_MATERIAL_EXPORT_CUSTOMDATA2					18
+ 
+ #define SUBSTRATE_MATERIAL_EXPORT_CONTEXT_OPAQUE				0
+ #define SUBSTRATE_MATERIAL_EXPORT_CONTEXT_TRANSLUCENT			1
+diff --git a/Engine/Shaders/Private/FastMath.ush b/Engine/Shaders/Private/FastMath.ush
+index c4a57853f194..effe696a86ec 100644
+--- a/Engine/Shaders/Private/FastMath.ush
++++ b/Engine/Shaders/Private/FastMath.ush
+@@ -7,6 +7,7 @@
+ #pragma once
+ 
+ #include "FastMathThirdParty.ush"
++#include "RDTGMath.ush"
+ 
+ // Reference: http://www.humus.name/Articles/Persson_LowLevelThinking.pdf p.27
+ #define FastExp_N(T) T FastExp(T x) { return exp2(1.442695f * x); }
+diff --git a/Engine/Shaders/Private/MaterialTemplate.ush b/Engine/Shaders/Private/MaterialTemplate.ush
+index 9efb03b54489..bb7aa56279d9 100644
+--- a/Engine/Shaders/Private/MaterialTemplate.ush
++++ b/Engine/Shaders/Private/MaterialTemplate.ush
+@@ -980,6 +980,12 @@ FWSVector3 GetWorldPosition(FMaterialPixelParameters Parameters)
+ 	return Parameters.LWCData.AbsoluteWorldPosition;
+ }
+ 
++//RDTG
++float3 GetReflectionVectorRetro(FMaterialPixelParameters Parameters)
++{
++	return Parameters.ReflectionVector;
++}
++
+ FWSVector3 GetWorldPosition_NoMaterialOffsets(FMaterialPixelParameters Parameters)
+ {
+ 	return Parameters.LWCData.WorldPosition_NoOffsets;
+@@ -3979,6 +3985,66 @@ half GetMaterialCustomData1(FPixelMaterialInputs PixelMaterialInputs)
+ 	return PixelMaterialInputs.CustomData1;
+ }
+ 
++//half GetMaterialCustomData2(FPixelMaterialInputs PixelMaterialInputs)
++//{
++//	return PixelMaterialInputs.CustomData2;
++//}
++
++//float3 GetRetroreflectionCustomOutput(in FMaterialPixelParameters MaterialParameters)
++//{
++//	#if NUM_MATERIAL_OUTPUTS_GETRETROREFLECTION > 0
++//	return GetRetroreflection0(MaterialParameters);
++//#else
++//	return MaterialParameters.SubsurfaceColor;
++//#endif
++//}
++
++//float4 GetRetroreflectionCustomOutput(FPixelMaterialInputs PixelMaterialInputs)
++//{
++//#if NUM_MATERIAL_OUTPUTS_GETRETROREFLECTION > 0
++//	return GetRetroreflection0(PixelMaterialInputs);
++//#else
++//	float4 RetroreflectionControl = PixelMaterialInputs.Subsurface;
++//	MaterialFloat4 RetroreflectionOutput = RetroreflectionControl;
++//	RetroreflectionOutput.rgb = saturate(RetroreflectionOutput.rgb);
++//	return RetroreflectionOutput;
++//#endif
++//}
++
++float4 GetRetroreflectionCustomOutput(in FMaterialPixelParameters MaterialParameters, FPixelMaterialInputs PixelMaterialInputs)
++{
++#if NUM_MATERIAL_OUTPUTS_GETRETROREFLECTION > 0
++	return GetRetroreflection0(MaterialParameters);
++#else
++	float4 RetroreflectionControl = PixelMaterialInputs.Subsurface;
++	MaterialFloat4 RetroreflectionOutput = RetroreflectionControl;
++	RetroreflectionOutput.rgb = saturate(RetroreflectionOutput.rgb);
++	return RetroreflectionOutput;
++#endif
++}
++
++// RDTG
++/**
++* .r:Retroreflection Mask in 0..1 range
++* .b:RetroreflectionIntensity in 0..1 range
++* .g:RetroreflecctionDepth in 0..1 range
++* .a:Retroreflection Camera Depth Fade in 0..inf range
++**/
++MaterialFloat4 GetMaterialRetroreflectionDataRaw(FPixelMaterialInputs PixelMaterialInputs)
++{
++	return PixelMaterialInputs.Subsurface;
++}
++
++MaterialFloat4 GetMaterialRetroreflectionData(FPixelMaterialInputs PixelMaterialInputs)
++{
++	MaterialFloat4 RetroreflectionOutput = GetMaterialRetroreflectionDataRaw(PixelMaterialInputs);
++	RetroreflectionOutput.rgb = saturate(RetroreflectionOutput.rgb);
++	return RetroreflectionOutput;
++
++	//float4 RetroreflectionOutput = float4(PixelMaterialInputs.Subsurface.r, PixelMaterialInputs.Subsurface.g, PixelMaterialInputs.Subsurface.b, 1.0f);
++	//return RetroreflectionOutput;
++}
++
+ SHADER_POP_WARNINGS_STATE
+ 
+ half GetMaterialAmbientOcclusionRaw(FPixelMaterialInputs PixelMaterialInputs)
+diff --git a/Engine/Shaders/Private/PathTracing/PathTracingMaterialHitShader.usf b/Engine/Shaders/Private/PathTracing/PathTracingMaterialHitShader.usf
+index e699b6a9f163..77a3bc9daae2 100644
+--- a/Engine/Shaders/Private/PathTracing/PathTracingMaterialHitShader.usf
++++ b/Engine/Shaders/Private/PathTracing/PathTracingMaterialHitShader.usf
+@@ -686,6 +686,11 @@ RAY_TRACING_ENTRY_CLOSEST_HIT(PathTracingMaterialCHS,
+ 					Payload.ShadingModelID      = SHADINGMODELID_THIN_TRANSLUCENT;
+ #endif
+ 
++// RDTG
++#if MATERIAL_HAS_RETROREFLECTIONS
++						Payload.ShadingModelID	= SHADINGMODELID_RETROREFLECTIVE;
++#endif
++						
+ #if MATERIALBLENDING_ANY_TRANSLUCENT && REFRACTION_USE_INDEX_OF_REFRACTION
+ 					// NOTE: only the bottom most layer can refract, coatings should never include a refraction lobe
+ 					Payload.Ior					= BSDF.bIsBottom ? GetRefractionIor(PixelMaterialInputs, Payload.SpecularColor) : 0.0;
+@@ -901,6 +906,14 @@ RAY_TRACING_ENTRY_CLOSEST_HIT(PathTracingMaterialCHS,
+ 	else
+ #endif
+ 
++// RDTG - Retroreflection Shading Model 1.5
++// Disabling for now.
++//#if MATERIAL_SHADINGMODEL_RETROREFLECTIVE
++//	if (Payload.ShadingModelID == SHADINGMODELID_RETROREFLECTIVE)
++//	{
++//		GetMaterialSubsurfaceData(PixelMaterialInputs);
++//	}
++//#endif
+ 
+ #if MATERIAL_SHADINGMODEL_CLEAR_COAT
+ 	if (Payload.ShadingModelID == SHADINGMODELID_CLEAR_COAT)
+diff --git a/Engine/Shaders/Private/PostProcessGBufferHints.usf b/Engine/Shaders/Private/PostProcessGBufferHints.usf
+index abc1006161f3..a2602c50b59a 100644
+--- a/Engine/Shaders/Private/PostProcessGBufferHints.usf
++++ b/Engine/Shaders/Private/PostProcessGBufferHints.usf
+@@ -144,6 +144,7 @@ void PrintShadingMode(inout FShaderPrintContext Ctx, uint In)
+ 	if (In == SHADINGMODELID_THIN_TRANSLUCENT)		{ Print(Ctx, TEXT("THIN_TRANSLUCENT"), FontRed); return; }
+ 	if (In == SHADINGMODELID_SUBSTRATE)				{ Print(Ctx, TEXT("SUBSTRATE"), FontRed); return; }
+ 	if (In == SHADINGMODELID_NUM)					{ Print(Ctx, TEXT("NUM"), FontRed); return; }
++	if (In == SHADINGMODELID_RETROREFLECTIVE)		{ Print(Ctx, TEXT("RETROREFLECTIVE"), FontRed); return; }
+ 	if (In == SHADINGMODELID_MASK) 					{ Print(Ctx, TEXT("MASK"), FontRed); return; }
+ }
+ 
+@@ -230,6 +231,11 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+ 		Print(Ctx, TEXT("Subsurface Color  : "), FontWhite); Print(Ctx, ExtractSubsurfaceColor(Data), FontYellow); Newline(Ctx, RectMax);
+ 		Print(Ctx, TEXT("Opacity           : "), FontWhite); Print(Ctx, Data.CustomData.a, FontYellow); Newline(Ctx, RectMax);
+ 		}
++		else if (Data.ShadingModelID == SHADINGMODELID_RETROREFLECTIVE)
++		{
++		Print(Ctx, TEXT("Retro Mask        : "), FontWhite); Print(Ctx, Data.CustomData.x, FontYellow); Newline(Ctx, RectMax);
++		Print(Ctx, TEXT("Retro Fade Depth  : "), FontWhite); Print(Ctx, Data.CustomData.y, FontYellow); Newline(Ctx, RectMax);
++		}
+ 		else if (Data.ShadingModelID == SHADINGMODELID_SUBSURFACE_PROFILE)
+ 		{
+ 			const uint SSSProfileID = ExtractSubsurfaceProfileInt(Data.CustomData.x);
+diff --git a/Engine/Shaders/Private/ShadingCommon.ush b/Engine/Shaders/Private/ShadingCommon.ush
+index 87cd30c951ab..9455d3f64090 100644
+--- a/Engine/Shaders/Private/ShadingCommon.ush
++++ b/Engine/Shaders/Private/ShadingCommon.ush
+@@ -30,7 +30,8 @@
+ #define SHADINGMODELID_SINGLELAYERWATER		10
+ #define SHADINGMODELID_THIN_TRANSLUCENT		11
+ #define SHADINGMODELID_SUBSTRATE			12		// Temporary while we convert everything to Substrate
+-#define SHADINGMODELID_NUM					13
++#define SHADINGMODELID_RETROREFLECTIVE		13		// Retroreflective SM - RDTG
++#define SHADINGMODELID_NUM					15
+ #define SHADINGMODELID_MASK					0xF		// 4 bits reserved for ShadingModelID			
+ 
+ // The flags are defined so that 0 value has no effect!
+@@ -40,6 +41,8 @@
+ #define ZERO_PRECSHADOW_MASK			(1 << 6)
+ #define IS_FIRST_PERSON_MASK			(1 << 6) // Technically not related to the SelectiveOutputMask, but IS_FIRST_PERSON_MASK shares a bit with ZERO_PRECSHADOW_MASK and consequently only works if ALLOW_STATIC_LIGHTING is 0.
+ #define SKIP_VELOCITY_MASK				(1 << 7)
++// RDTG
++#define HAS_RETROREFLECTION_MASK		(1 << 8) // This might not work
+ 
+ #define SSS_PROFILE_ID_INVALID  256
+ #define SSS_PROFILE_ID_PERPIXEL 512
+@@ -63,6 +66,7 @@ float3 GetShadingModelColor(uint ShadingModelID)
+ 	else if (ShadingModelID == SHADINGMODELID_SINGLELAYERWATER) return float3(0.5f, 0.5f, 1.0f);
+ 	else if (ShadingModelID == SHADINGMODELID_THIN_TRANSLUCENT) return float3(1.0f, 0.8f, 0.3f);
+ 	else if (ShadingModelID == SHADINGMODELID_SUBSTRATE) return float3(1.0f, 1.0f, 0.0f);
++	else if (ShadingModelID == SHADINGMODELID_RETROREFLECTIVE) return float3(0.77f, 0.66f, 0.0f); // Yellowish -- RDTG
+ 	else return float3(1.0f, 1.0f, 1.0f); // White
+ #else
+ 	switch(ShadingModelID)
+@@ -80,6 +84,7 @@ float3 GetShadingModelColor(uint ShadingModelID)
+ 		case SHADINGMODELID_SINGLELAYERWATER: return float3(0.5f, 0.5f, 1.0f);
+ 		case SHADINGMODELID_THIN_TRANSLUCENT: return float3(1.0f, 0.8f, 0.3f);
+ 		case SHADINGMODELID_SUBSTRATE: return float3(1.0f, 1.0f, 0.0f);
++		case SHADINGMODELID_RETROREFLECTIVE: return float3(0.77f, 0.66f, 0.0f); // Yellowish -- RDTG
+ 		default: return float3(1.0f, 1.0f, 1.0f); // White
+ 	}
+ #endif
+diff --git a/Engine/Shaders/Private/ShadingEnergyConservationTemplate.ush b/Engine/Shaders/Private/ShadingEnergyConservationTemplate.ush
+index 4483fba7a199..dc542c3fba7b 100644
+--- a/Engine/Shaders/Private/ShadingEnergyConservationTemplate.ush
++++ b/Engine/Shaders/Private/ShadingEnergyConservationTemplate.ush
+@@ -41,6 +41,13 @@ struct BXDF_ENERGY_SUFFIX(FBxDFEnergyTerms)
+ 	BXDF_ENERGY_TYPE E; // Directional albedo of the lobe for energy preservation and lobe picking
+ };
+ 
++// RDTG - Retroreflection Shading Model 1.4
++struct BXDF_RETRO_ENERGY_SUFFIX(FBxDFEnergyTerms)
++{
++	BXDF_ENERGY_TYPE W; // overall weight to scale the lobe BxDF by to ensure energy conservation
++	BXDF_ENERGY_TYPE E; // Directional albedo of the lobe for energy preservation and lobe picking
++};
++
+ // Given a split-sum approximation of directional albedo for a BxDF, compute multiple scattering weight and multiple scattering directional albedo
+ // while taking into account the fresnel term (assumed to be F_Schlick)
+ BXDF_ENERGY_SUFFIX(FBxDFEnergyTerms) BXDF_ENERGY_SUFFIX(ComputeFresnelEnergyTerms)(float2 E, float3 InF0, float3 InF90)
+diff --git a/Engine/Shaders/Private/ShadingModels.ush b/Engine/Shaders/Private/ShadingModels.ush
+index baced3d0c1fb..c81e208209c4 100644
+--- a/Engine/Shaders/Private/ShadingModels.ush
++++ b/Engine/Shaders/Private/ShadingModels.ush
+@@ -184,6 +184,14 @@ float EnergyNormalization( inout float a2, float VoH, FAreaLight AreaLight )
+ 	return Energy;
+ }
+ 
++// RDTG -------
++float3 ColorSaturation(float3 In, float Saturation)
++{
++	float luma = dot(In, float3(0.2126729, 0.7151522, 0.0721750));
++	return luma.xxx + Saturation.xxx * (In - luma.xxx);
++}
++// ----------
++
+ float3 SpecularGGX(float Roughness, float Anisotropy, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
+ {
+ 	float Alpha = Roughness * Roughness;
+@@ -240,6 +248,346 @@ half3 DualSpecularGGX(half AverageRoughness, half Lobe0Roughness, half Lobe1Roug
+ 	return (D * Vis) * F;
+ }
+ 
++float3 SpecularGGXR(float Roughness, float Anisotropy, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
++{
++	float Alpha = Roughness * Roughness;
++	float a2 = Alpha * Alpha;
++
++	FAreaLight Punctual = AreaLight;
++	Punctual.SphereSinAlpha = 0;
++	Punctual.SphereSinAlphaSoft = 0;
++	Punctual.LineCosSubtended = 1;
++	Punctual.Rect = (FRect)0;
++	Punctual.IsRectAndDiffuseMicroReflWeight = 0;
++
++	float Energy = EnergyNormalization(a2, Context.VoH, Punctual);
++
++	float ax = 0;
++	float ay = 0;
++	GetAnisotropicRoughness(Alpha, Anisotropy, ax, ay);
++
++	// Generalized microfacet specular
++	float3 D = D_GGXaniso(ax, ay, Context.VoL, Context.XoL, Context.YoL) * Energy;
++	float3 Vis = Vis_SmithJointAniso(ax, ay, Context.NoV, NoL, Context.XoV, Context.XoL, Context.YoV, Context.YoL);
++	float3 F = F_Schlick( SpecularColor, Context.VoH );
++
++	return (D * Vis) * F;
++}
++
++float3 SpecularGGXR( float Roughness, float3 SpecularColor, BxDFContext Context, half NoL, FAreaLight AreaLight )
++{
++	float a2 = Pow4( Roughness );
++	float Energy = EnergyNormalization( a2, Context.VoH, AreaLight );
++	
++	// Generalized microfacet specular
++	float D = D_GGX( a2, Context.VoL ) * Energy;
++	float Vis = Vis_SmithJointApprox( a2, Context.NoV, NoL );
++	float3 F = F_Schlick( SpecularColor, Context.VoH );
++
++	return (D * Vis) * F;
++}
++
++float3 SpecularGTR1( float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight )
++{
++	float a2 = Pow4( Roughness );
++	float Energy = EnergyNormalization( a2, Context.VoH, AreaLight );
++	
++	// Generalized microfacet specular
++	float D = D_GTR1( a2, Context.NoH ) * Energy;
++	float Vis = Vis_Smith( a2, Context.NoV, NoL ); // Original: Vis_SmithJointApprox
++	float3 F = F_Fresnel( SpecularColor, Context.VoH ); // Original: F_Schlick
++
++	return (D * Vis) * F;
++}
++
++float3 SpecularGTR2( float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight )
++{
++	float a2 = Pow4( Roughness );
++	float Energy = EnergyNormalization( a2, Context.VoH, AreaLight );
++	
++	// Generalized microfacet specular
++	float D = D_GTR2( a2, Context.NoH ) * Energy;
++	float Vis = Vis_SmithJointApprox( a2, Context.NoV, NoL );
++	float3 F = F_Schlick( SpecularColor, Context.VoH );
++
++	return (D * Vis) * F;
++}
++
++float3 SpecularRRGTR( float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight )
++{
++
++	float a2 = Pow4( Roughness );
++	float Energy = EnergyNormalization( a2, Context.VoH, AreaLight );
++	
++	// Generalized microfacet specular
++	//float D = D_GGX( a2, Context.NoH ) * Energy;
++	//float Vis = Vis_SmithJointApprox( a2, Context.NoV, NoL );
++	//float3 F = F_Schlick( SpecularColor, Context.VoH );
++
++	// Retro-reflection specular
++	float D = D_RRGTR1( a2, Context.VoL ) * Energy;
++	float Vis = Vis_SmithJoint( a2, Context.NoV, NoL );
++	float3 F = F_SchlickGaussian( SpecularColor, Context.VoH );
++
++	return (D * Vis) * F;
++}
++
++float3 SpecularRRGTR(float RoughnessBoost, float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight )
++{
++
++	float a2 = Pow4( Roughness );
++	float a2E = Pow2( RoughnessBoost );
++	float Boosted = RoughnessBoost + RoughnessBoost + RoughnessBoost;
++	float Energy = EnergyNormalization( a2, Context.VoH, AreaLight );
++	
++	// Generalized microfacet specular
++	//float D = D_GGX( a2, Context.NoH ) * Energy;0
++	//float Vis = Vis_SmithJointApprox( a2, Context.NoV, NoL );
++	//float3 F = F_Schlick( SpecularColor, Context.VoH );
++
++	// Retro-reflection specular
++	float D = D_RRGTR1( a2, Context.VoL ) * Energy;
++	float Vis = Vis_SmithJoint( a2, Context.NoV, NoL );
++	float3 F = F_SchlickGaussian( SpecularColor, Context.VoH );
++
++	float3 Output = (D * Vis) * F;
++
++	return Output * ( 5.5 * RoughnessBoost );
++}
++
++float3 SpecularRRGTR2( float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight )
++{
++
++	float a2 = Pow4( Roughness );
++	float Energy = EnergyNormalization( a2, Context.VoH, AreaLight );
++	
++	// Generalized microfacet specular
++	//float D = D_GGX( a2, Context.NoH ) * Energy;
++	//float Vis = Vis_SmithJointApprox( a2, Context.NoV, NoL );
++	//float3 F = F_Schlick( SpecularColor, Context.VoH );
++
++	// Retro-reflection specular
++	float D = D_RRGTR2( a2, Context.VoL ) * Energy;
++	float Vis = Vis_SmithJointApprox( a2, Context.NoV, NoL );
++	float3 F = F_Schlick( SpecularColor, Context.VoH );
++
++	return (D * Vis) * F;
++}
++
++float3 SpecularG1RRX( float Roughness, float3 SpecularColor, BxDFContext Context, float NoV, float NoL, FAreaLight AreaLight )
++{
++
++	float a2 = Pow4( Roughness );
++	float Energy = EnergyNormalization( a2, Context.VoH, AreaLight );
++	
++	// Generalized microfacet specular
++	//float D = D_GGX( a2, Context.NoH ) * Energy;
++	//float Vis = Vis_SmithJointApprox( a2, Context.NoV, NoL );
++	//float3 F = F_Schlick( SpecularColor, Context.VoH );
++
++	// Retro-reflection specular
++	float D = D_G1_RRX( a2, Context.VoL ) * Energy;
++	//float Vis = Vis_SmithJointApprox( a2, Context.NoV, NoL );
++	float Vis = V_Neubelt ( Context.NoV, NoL );
++	float3 F = F_Schlick( SpecularColor, Context.VoH );
++
++	return (D * Vis) * F;
++}
++
++// RDTG - Retroreflective Shading Model
++FDirectLighting RetroreflectiveBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow )
++{
++	/* Channel Info:
++	* Red: Retroreflection Mask - Masks out the retroreflection specular term and replaces it with the regular specular term.
++	* Green: RetroreflectionDepth - 
++	* Blue: RetroreflectiveIntensity - A flat value we are using to control the falloff of the retroreflection based on distance from the light.
++	* Alpha (Opacity): RetroDepthFade - Using the camera and reflection vectors we can get a camera distance depth fade value to fade the retro spec term out at close distances.
++	*/
++
++	//Initialize RetroDepthFade first so we can use it in the mask parameter.
++	const float RetroDepthFade = GBuffer.CustomData.a;
++	const float3 RetroreflectionControls = GBuffer.CustomData.rgb;
++	const float RetroreflectionMask	= saturate(GBuffer.CustomData.r);
++	const float RetroreflectionDepth = GBuffer.CustomData.g;
++	const float RetroreflectiveIntensity = GBuffer.CustomData.b;
++
++
++	const bool bDebugOnlyOption1 = true;
++
++	BxDFContext Context;
++	FDirectLighting Lighting;
++	Lighting.Diffuse = 0;
++	Lighting.Specular = 0;
++	Lighting.Transmission = 0;
++
++	//bool bIsRetroreflective = false;
++
++	// Here we will ONLY enable retroreflection in the CSM **IF** there is a RetroreflectionCustomOutput node in the graph! We can use this to direclty implement this into DefaultLit later, negating the need for a new CSM altogether.
++#if NUM_MATERIAL_OUTPUTS_GETRETROREFLECTION
++	bool bIsRetroreflective = true;
++#else
++	bool bIsRetroreflective = false;
++#endif
++
++	/*BRANCH
++	if (RetroreflectionMask == 0)
++	{
++		bIsRetroreflective = false;
++	}
++	else
++	{
++		bIsRetroreflective = true;
++	}*/
++
++	
++#if FEATURE_LEVEL == FEATURE_LEVEL_ES3_1
++	// adjust N for Adreno shader compilation bug. See UE-274816
++	N = N * 0.5f;
++	N = normalize(N);
++#endif
++	
++	
++	BRANCH
++	if (NoL > 0.0f)
++	{
++#if SUPPORTS_ANISOTROPIC_MATERIALS
++		bool bHasAnisotropy = HasAnisotropy(GBuffer.SelectiveOutputMask);
++#else
++		bool bHasAnisotropy = false;
++#endif
++
++		float NoV, VoH, NoH, VoL, VoN;
++		BRANCH
++		if (bHasAnisotropy)
++		{
++			half3 X = GBuffer.WorldTangent;
++			half3 Y = normalize(cross(N, X));
++			Init(Context, N, X, Y, V, L);
++
++			NoV = Context.NoV;
++			VoH = Context.VoH;
++			NoH = Context.NoH;
++			VoL = Context.VoL;
++			VoN = Context.VoN;
++		}
++		else
++		{
++#if SHADING_PATH_MOBILE
++			InitMobile(Context, N, V, L, NoL);
++#else
++			Init(Context, N, V, L);
++#endif
++
++			NoV = Context.NoV;
++			VoH = Context.VoH;
++			NoH = Context.NoH;
++			VoL = Context.VoL;
++			VoN = Context.VoN;
++
++			SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
++		}
++
++		Context.NoV = saturate(abs( Context.NoV ) + 1e-5);
++
++	float AdjustedRoughness = GBuffer.Roughness * 1.f; //RetroreflectiveIntensity;
++	float3 ReturnColor = ColorSaturation(GBuffer.BaseColor, 5);
++	float3 SpecColorMult = ReturnColor * 2.0f;
++	float3 RetroreflectionColor = lerp( GBuffer.SpecularColor, ReturnColor, 0.7f); //RetroreflectionDepth );
++
++
++	// Artist controls (material params or cvars)
++	const float NoLFalloffExp = RetroreflectiveIntensity; //e.g., 1.0..4.0 to tame grazing angles 
++
++
++#if MATERIAL_ROUGHDIFFUSE
++		// Chan diffuse model with roughness == specular roughness. This is not necessarily a good modelisation of reality because when the mean free path is super small, the diffuse can in fact looks rougher. But this is a start.
++		// Also we cannot use the morphed context maximising NoH as this is causing visual artefact when interpolating rough/smooth diffuse response. 
++		Lighting.Diffuse = Diffuse_Chan(GBuffer.DiffuseColor, Pow4(GBuffer.Roughness), NoV, NoL, VoH, NoH, GetAreaLightDiffuseMicroReflWeight(AreaLight));
++#else
++		Lighting.Diffuse = Diffuse_Lambert(GBuffer.DiffuseColor);
++#endif
++		Lighting.Diffuse *= AreaLight.FalloffColor * (Falloff * NoL);
++
++		BRANCH
++		if (bHasAnisotropy)
++		{
++			if (bIsRetroreflective)
++			{
++			//Lighting.Specular = GBuffer.WorldTangent * .5f + .5f;
++			float3 RetroSpecular  = AreaLight.FalloffColor * ((Falloff * NoL) * NoLFalloffExp) * SpecularGGXR(GBuffer.Roughness, RetroreflectionColor, Context, NoL, AreaLight);
++			float3 AnisoSpecular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.Anisotropy, GBuffer.SpecularColor, Context, NoL, AreaLight);
++			Lighting.Specular = lerp(AnisoSpecular, RetroSpecular, RetroreflectionMask);
++			}
++			else
++			{
++			Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.Anisotropy, GBuffer.SpecularColor, Context, NoL, AreaLight);
++			}
++		}
++		else
++		{
++			BRANCH
++			if (bIsRetroreflective)
++			{
++				if( IsRectLight(AreaLight) )
++				{
++					//TO-DO: Remove all of these branches and consolidate if possible.
++					//TO-DO: Find a better way to acheive retro specular on rect lights, this method just creates a second rect spec term with inverted view vector. It works, but is not ideal as if
++					//you have a rect light and a normal light shining on a retroreflective object, it can also potentially create issues with deferred decals causing fireflies and other visual artifacts.
++					float3 RectDefaultSpecular = RectGGXApproxLTC(GBuffer.Roughness, GBuffer.SpecularColor, N, V, AreaLight.Rect, AreaLight.Texture);
++					float3 RectRetroSpecular = RectGGXApproxLTC(GBuffer.Roughness, RetroreflectionColor, N, -V, AreaLight.Rect, AreaLight.Texture);
++					float3 RectSpecularFinal = lerp(RectDefaultSpecular, lerp(RectDefaultSpecular, RectRetroSpecular, RetroreflectionMask), RetroDepthFade);
++					Lighting.Specular = RectSpecularFinal;
++				
++				}
++				else
++				{
++					// Pull a control from your CustomData (pick a channel)
++					const float SpecFalloffFloor = RetroreflectionDepth;
++
++					// Build an extended falloff just for SPECULAR
++					float FalloffSpec = max(Falloff, SpecFalloffFloor);
++
++					// Create the standard specular term first
++					float3 BaseSpecular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX( GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight );
++					
++					// Create the retroreflective specular term
++					float3 RetroSpecular  = AreaLight.FalloffColor * ((FalloffSpec * NoL) * NoLFalloffExp) * SpecularGGXR(GBuffer.Roughness, RetroreflectionColor, Context, NoL, AreaLight);
++
++					// Lerp 0 with the retroreflective specular term and lerp again wtih 0 & the retrodepthfade param for a falloff then add the normal specular term. This way we have both, and at shallow grazing angles the surface still looks correct.
++					Lighting.Specular = lerp(BaseSpecular, lerp(BaseSpecular, RetroSpecular, RetroreflectionMask), RetroDepthFade);
++				}
++			}
++			else
++			{
++				if( IsRectLight(AreaLight) )
++				{
++					Lighting.Specular = RectGGXApproxLTC(GBuffer.Roughness, GBuffer.SpecularColor, N, V, AreaLight.Rect, AreaLight.Texture);
++				}
++				else
++				{
++					Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * SpecularGGX(GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight);
++				}
++			}
++		}
++
++		FBxDFEnergyTerms EnergyTerms = ComputeGGXSpecEnergyTerms(GBuffer.Roughness, Context.NoV, GBuffer.SpecularColor);
++		FBxDFEnergyTerms EnergyTermsRetro = ComputeGGXSpecEnergyTerms(GBuffer.Roughness, Context.VoL, RetroreflectionColor);
++
++		// Add energy presevation (i.e. attenuation of the specular layer onto the diffuse component
++		Lighting.Diffuse *= ComputeEnergyPreservation(EnergyTerms);
++
++		// Add specular microfacet multiple scattering term (energy-conservation)
++		//float3 StdSpecularEnergyConservation = ComputeEnergyConservation(EnergyTerms);
++		//float3 RetroSpecularEnergyConservation = ComputeEnergyConservation(EnergyTermsRetro);
++		//Lighting.Specular *= lerp( StdSpecularEnergyConservation, RetroSpecularEnergyConservation, RetroreflectionMask ); // Change RetroSpecularEnergyConservation to 1 if breaks
++		
++	}
++
++	Lighting.Transmission = 0;
++	return Lighting;
++}
++// RDTG - End Retroreflective Shading Model
++
+ FDirectLighting DefaultLitBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, half NoL, FAreaLight AreaLight, FShadowTerms Shadow )
+ {
+ 	BxDFContext Context;
+@@ -960,6 +1308,8 @@ FDirectLighting IntegrateBxDF( FGBufferData GBuffer, half3 N, half3 V, half3 L,
+ 			return ClothBxDF( GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow );
+ 		case SHADINGMODELID_EYE:
+ 			return EyeBxDF( GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow );
++		case SHADINGMODELID_RETROREFLECTIVE:
++			return RetroreflectiveBxDF( GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow );
+ 		default:
+ 			return (FDirectLighting)0;
+ 	}
+diff --git a/Engine/Shaders/Private/ShadingModelsMaterial.ush b/Engine/Shaders/Private/ShadingModelsMaterial.ush
+index 70636f2f3ff7..906737df1b2b 100644
+--- a/Engine/Shaders/Private/ShadingModelsMaterial.ush
++++ b/Engine/Shaders/Private/ShadingModelsMaterial.ush
+@@ -39,6 +39,34 @@ void SetGBufferForShadingModel(
+ 	if (false)
+ 	{
+ 	}
++
++#if MATERIAL_SHADINGMODEL_RETROREFLECTIVE
++	else if (ShadingModel == SHADINGMODELID_RETROREFLECTIVE)
++	{
++		//float RetroreflectionMask		 = saturate( GetMaterialCustomData0(PixelMaterialInputs) );
++		//float RetroreflectionDepth	 = saturate( GetMaterialCustomData1(PixelMaterialInputs) );
++		//float4 RetroreflectionControls = GetMaterialRetroreflectionData(PixelMaterialInputs);
++		/** 
++		* Uses both MaterialParameters and PixelMaterialInputs as a fallback in case the custom output isn't used. 
++		* In this case it falls back to trying to get the data from SubsurfaceColor. 
++		*/
++		float4 RetroreflectionControls = GetRetroreflectionCustomOutput(MaterialParameters, PixelMaterialInputs);
++		float3 WorldPosCam = GetTranslatedWorldPosition(MaterialParameters);
++		float3 ReflectionVec = GetReflectionVectorRetro(MaterialParameters);
++		GBuffer.CustomData.rgb = EncodeRetroreflectionColor(RetroreflectionControls.rgb);
++
++		float RetroDepthFade = saturate(distance(WorldPosCam,ReflectionVec) / GetRetroreflectionCustomOutput(MaterialParameters, PixelMaterialInputs).a); //Distance before retroreflective specular fades out completely leaving only standard specular reflectance.
++		
++		GBuffer.CustomData.a = RetroDepthFade;
++
++		// Clamp roughness to guarantee functional inverse when computing SphereSinAlpha on multiple layers & to prevent impossible materials breaking the diffuse and specular models.
++		GBuffer.Roughness = clamp(GBuffer.Roughness, 0.0, 254.0 / 255.0); //- Commented out for now. It seems to be broken with roughness clamped.
++
++		GBuffer.ShadingModelID = SHADINGMODELID_RETROREFLECTIVE;
++
++	}
++#endif
++
+ #if MATERIAL_SHADINGMODEL_SUBSURFACE
+ 	else if (ShadingModel == SHADINGMODELID_SUBSURFACE)
+ 	{
+diff --git a/Engine/Shaders/Private/ShadingModelsSampling.ush b/Engine/Shaders/Private/ShadingModelsSampling.ush
+index c10b4778d30b..0e870310ef32 100644
+--- a/Engine/Shaders/Private/ShadingModelsSampling.ush
++++ b/Engine/Shaders/Private/ShadingModelsSampling.ush
+@@ -215,6 +215,7 @@ FBxDFSample SampleBxDF(const uint TermMask, FGBufferData GBuffer, float3 V, floa
+ 		case SHADINGMODELID_TWOSIDED_FOLIAGE:
+ 		case SHADINGMODELID_CLOTH:
+ 		case SHADINGMODELID_EYE:
++		case SHADINGMODELID_RETROREFLECTIVE:
+ 			return SampleDefaultLitBxDF(TermMask, GBuffer, V, E);
+ 		case SHADINGMODELID_HAIR:
+ 			return SampleHairBxDF(TermMask, GBuffer, V, E);
+@@ -237,6 +238,7 @@ bool SupportsSampleBxDF(uint ShadingModelID)
+ 	case SHADINGMODELID_CLOTH:
+ 	case SHADINGMODELID_EYE:
+ 	case SHADINGMODELID_HAIR:
++	case SHADINGMODELID_RETROREFLECTIVE:
+ 		return true;
+ 	default:
+ 		return false;
+diff --git a/Engine/Shaders/Private/Substrate/Substrate.ush b/Engine/Shaders/Private/Substrate/Substrate.ush
+index 5dd10ce9f3d0..7dd34c0207ca 100644
+--- a/Engine/Shaders/Private/Substrate/Substrate.ush
++++ b/Engine/Shaders/Private/Substrate/Substrate.ush
+@@ -3726,6 +3726,8 @@ float SubstrateGetLegacyShadingModels(in FSubstrateBSDF BSDF)
+ 	case SUBSTRATE_BSDF_TYPE_EYE: 								{ return SHADINGMODELID_EYE; }
+ 	case SUBSTRATE_BSDF_TYPE_SINGLELAYERWATER:					{ return SHADINGMODELID_SINGLELAYERWATER; }
+ 	case SUBSTRATE_BSDF_TYPE_UNLIT:								{ return SHADINGMODELID_UNLIT; } // This in fact does not show up because unlit does not write any information as it is not needed for any lighting passes down the line.
++	// RDTG
++	//case SUBSTRATE_BSDF_TYPE_RETROREFLECTIVE;					{ return SHADINGMODELID_RETROREFLECTIVE; }
+ 	}
+ 	return 0.f;
+ }
+diff --git a/Engine/Shaders/Shared/SubstrateDefinitions.h b/Engine/Shaders/Shared/SubstrateDefinitions.h
+index 57c3b253dcfd..108d6cfbb16e 100644
+--- a/Engine/Shaders/Shared/SubstrateDefinitions.h
++++ b/Engine/Shaders/Shared/SubstrateDefinitions.h
+@@ -36,6 +36,8 @@
+ #define SUBSTRATE_BSDF_TYPE_HAIR						3
+ #define SUBSTRATE_BSDF_TYPE_SINGLELAYERWATER			4
+ #define SUBSTRATE_BSDF_TYPE_EYE							5
++// RDTG
++#define SUBSTRATE_BSDF_TYPE_RETROREFLECTIVE				6
+ // When more than 7 BSDF must exists, please update STATE_BIT_COUNT_BSDF and FSubstrateClassification.ShadingModels packing in Substrate.ush
+ 
+ // The size of Substrate material classification tiles on screen
+diff --git a/Engine/Source/Developer/MaterialBaking/Private/ExportMaterialProxy.h b/Engine/Source/Developer/MaterialBaking/Private/ExportMaterialProxy.h
+index 1a9cc8e19247..72b5f9c099fa 100644
+--- a/Engine/Source/Developer/MaterialBaking/Private/ExportMaterialProxy.h
++++ b/Engine/Source/Developer/MaterialBaking/Private/ExportMaterialProxy.h
+@@ -263,6 +263,8 @@ public:
+ 		case MP_ShadingModel: ResourceId.Usage = EMaterialShaderMapUsage::MaterialExportShadingModel; break;
+ 		case MP_CustomData0: ResourceId.Usage = EMaterialShaderMapUsage::MaterialExportClearCoat; break;
+ 		case MP_CustomData1: ResourceId.Usage = EMaterialShaderMapUsage::MaterialExportClearCoatRoughness; break;
++			// RDTG
++		case MP_CustomData2: ResourceId.Usage = EMaterialShaderMapUsage::MaterialExportRetroreflectionIntensity; break;
+ 		case MP_CustomOutput:
+ 			ResourceId.Usage = EMaterialShaderMapUsage::MaterialExportCustomOutput;
+ 			ResourceId.UsageCustomOutput = InCustomOutputToCompile;
+@@ -390,6 +392,10 @@ public:
+ 			case MP_CustomData1:
+ 				Compiler->SetSubstrateMaterialExportType(SME_CustomData1, ESubstrateMaterialExportContext::SMEC_Opaque, BLEND_Opaque);
+ 				break;
++				// RDTG
++			case MP_CustomData2:
++				Compiler->SetSubstrateMaterialExportType(SME_CustomData2, ESubstrateMaterialExportContext::SMEC_Opaque, BLEND_Opaque);
++				break;
+ 			case MP_SubsurfaceColor:
+ 				Compiler->SetSubstrateMaterialExportType(SME_SubsurfaceColor, ESubstrateMaterialExportContext::SMEC_Opaque, BLEND_Opaque);
+ 				break;
+@@ -418,6 +424,8 @@ public:
+ 			case MP_OpacityMask:
+ 			case MP_CustomData0:
+ 			case MP_CustomData1:
++				// RDTG
++			case MP_CustomData2:
+ 			case MP_SubsurfaceColor:
+ 				return MaterialInterface->CompileProperty(&ProxyCompiler, PropertyToCompile, ForceCast_Exact_Replicate);
+ 			case MP_Normal:
+@@ -545,6 +553,16 @@ public:
+ 		}
+ 		return false;
+ 	}
++	// RDTG
++	// Adding for material baking support.
++	virtual bool HasRetroreflections() const override
++	{
++		if(MaterialInterface)
++		{
++			return MaterialInterface->HasRetroreflections();
++		}
++		return false;
++	}
+ 	virtual bool IsDitheredLODTransition() const  override
+ 	{
+ 		if (MaterialInterface)
+diff --git a/Engine/Source/Developer/MaterialBaking/Private/MaterialBakingModule.cpp b/Engine/Source/Developer/MaterialBaking/Private/MaterialBakingModule.cpp
+index 2694696d49e8..4b49b48d5b73 100644
+--- a/Engine/Source/Developer/MaterialBaking/Private/MaterialBakingModule.cpp
++++ b/Engine/Source/Developer/MaterialBaking/Private/MaterialBakingModule.cpp
+@@ -301,6 +301,9 @@ void FMaterialBakingModule::StartupModule()
+ 	PerPropertyFormat.Add(MP_SubsurfaceColor, PF_B8G8R8A8);
+ 	PerPropertyFormat.Add(MP_CustomData0, PF_B8G8R8A8);
+ 	PerPropertyFormat.Add(MP_CustomData1, PF_B8G8R8A8);
++	// RDTG
++	PerPropertyFormat.Add(MP_CustomData2, PF_B8G8R8A8);
++	//PerPropertyFormat.Add(MP_CustomData3, PF_B8G8R8A8);
+ 	PerPropertyFormat.Add(MP_ShadingModel, PF_B8G8R8A8);
+ 	PerPropertyFormat.Add(FMaterialPropertyEx::ClearCoatBottomNormal, PF_B8G8R8A8);
+ 	PerPropertyFormat.Add(FMaterialPropertyEx::TransmittanceColor, PF_B8G8R8A8);
+diff --git a/Engine/Source/Developer/MaterialUtilities/Private/MaterialUtilities.cpp b/Engine/Source/Developer/MaterialUtilities/Private/MaterialUtilities.cpp
+index 09ebb6f1784d..f45343021eeb 100644
+--- a/Engine/Source/Developer/MaterialUtilities/Private/MaterialUtilities.cpp
++++ b/Engine/Source/Developer/MaterialUtilities/Private/MaterialUtilities.cpp
+@@ -111,6 +111,9 @@ UMaterialInterface* FMaterialUtilities::CreateProxyMaterialAndTextures(UPackage*
+ 	Material->BasePropertyOverrides.TwoSided = MaterialData.Material->IsTwoSided();
+ 	Material->BasePropertyOverrides.bOverride_TwoSided = MaterialData.Material->IsTwoSided();
+ 	Material->BasePropertyOverrides.bOverride_bIsThinSurface = MaterialData.Material->IsThinSurface();
++	// RDTG
++	Material->BasePropertyOverrides.bOverride_bHasRetroreflections = MaterialData.Material->HasRetroreflections();
++	
+ 	Material->BasePropertyOverrides.DitheredLODTransition = MaterialData.Material->IsDitheredLODTransition();
+ 	Material->BasePropertyOverrides.bOverride_DitheredLODTransition = MaterialData.Material->IsDitheredLODTransition();
+ 
+@@ -684,6 +687,16 @@ public:
+ 		}
+ 		return false;
+ 	}
++	// RDTG
++	virtual bool HasRetroreflections() const override
++	{
++		if(MaterialInterface)
++		{
++			return MaterialInterface->HasRetroreflections();
++		}
++		return false;
++	}
++	
+ 	virtual bool IsDitheredLODTransition() const  override
+ 	{ 
+ 		if (MaterialInterface)
+diff --git a/Engine/Source/Editor/MaterialEditor/Private/MaterialEditor.cpp b/Engine/Source/Editor/MaterialEditor/Private/MaterialEditor.cpp
+index 933fda004143..b1c15d6aa2a6 100644
+--- a/Engine/Source/Editor/MaterialEditor/Private/MaterialEditor.cpp
++++ b/Engine/Source/Editor/MaterialEditor/Private/MaterialEditor.cpp
+@@ -5140,6 +5140,8 @@ UClass* FMaterialEditor::GetOnPromoteToParameterClass(const UEdGraphPin* TargetP
+ 			case MP_Anisotropy:
+ 			case MP_CustomData0:
+ 			case MP_CustomData1:
++			// RDTG
++			case MP_CustomData2:
+ 			case MP_AmbientOcclusion:
+ 			case MP_Refraction:
+ 			case MP_PixelDepthOffset:
+@@ -5263,7 +5265,9 @@ bool FMaterialEditor::OnCanResetToDefault(const FToolMenuContext& InMenuContext)
+ 			case MP_Roughness:				
+ 			case MP_Anisotropy:				
+ 			case MP_CustomData0:			
+-			case MP_CustomData1:			
++			case MP_CustomData1:
++			// RDTG
++			case MP_CustomData2:
+ 			case MP_AmbientOcclusion:		
+ 			case MP_Refraction:				
+ 			case MP_OpacityMask:			
+@@ -5341,6 +5345,11 @@ void FMaterialEditor::OnResetToDefault(const FToolMenuContext& InMenuContext) co
+ 				EditorOnlyData->ClearCoatRoughness.Constant = FMaterialAttributeDefinitionMap::GetDefaultValue(MP_CustomData1).X;
+ 				TargetPin->GetSchema()->TrySetDefaultValue(*TargetPin, EditorOnlyData->ClearCoatRoughness.GetDefaultValue());
+ 				break;
++			// RDTG
++		case MP_CustomData2:
++			EditorOnlyData->RetroreflectionIntensity.Constant = FMaterialAttributeDefinitionMap::GetDefaultValue(MP_CustomData2).X;
++			TargetPin->GetSchema()->TrySetDefaultValue(*TargetPin, EditorOnlyData->RetroreflectionIntensity.GetDefaultValue());
++			break;
+ 			
+ 			case MP_AmbientOcclusion:
+ 				EditorOnlyData->AmbientOcclusion.Constant = FMaterialAttributeDefinitionMap::GetDefaultValue(MP_AmbientOcclusion).X;
+diff --git a/Engine/Source/Editor/MaterialEditor/Private/MaterialEditor.h b/Engine/Source/Editor/MaterialEditor/Private/MaterialEditor.h
+index 2f621c52407a..616e20939625 100644
+--- a/Engine/Source/Editor/MaterialEditor/Private/MaterialEditor.h
++++ b/Engine/Source/Editor/MaterialEditor/Private/MaterialEditor.h
+@@ -125,6 +125,8 @@ public:
+ 	virtual bool IsPreview() const override { return true; }
+ 	virtual bool IsTwoSided() const override { return false; }
+ 	virtual bool IsThinSurface() const override { return false; }
++	// RDTG
++	virtual bool HasRetroreflections() const override { return false; }
+ 	virtual bool IsDitheredLODTransition() const override { return false; }
+ 	virtual bool IsLightFunction() const override { return false; }
+ 	virtual bool IsDeferredDecal() const override { return false; }
+diff --git a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorDetailsCustomization.cpp b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorDetailsCustomization.cpp
+index 54da1630532c..fadf340b4542 100644
+--- a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorDetailsCustomization.cpp
++++ b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorDetailsCustomization.cpp
+@@ -156,7 +156,10 @@ void FPixelInspectorDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
+ 	TSharedRef<IPropertyHandle> EyeTangentProp = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UPixelInspectorView, EyeTangent));
+ 	TSharedRef<IPropertyHandle> IrisMaskProp = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UPixelInspectorView, IrisMask));
+ 	TSharedRef<IPropertyHandle> IrisDistanceProp = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UPixelInspectorView, IrisDistance));
+-
++	// RDTG
++	// CustomData2
++	TSharedRef<IPropertyHandle> RetroreflectionIntensityProp = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UPixelInspectorView, RetroreflectiveIntensity));
++	
+ 	EMaterialShadingModel MaterialShadingModel = PixelInspectorView->MaterialShadingModel;
+ 	switch (MaterialShadingModel)
+ 	{
+@@ -176,8 +179,24 @@ void FPixelInspectorDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
+ 			DetailBuilder.HideProperty(EyeTangentProp);
+ 			DetailBuilder.HideProperty(IrisMaskProp);
+ 			DetailBuilder.HideProperty(IrisDistanceProp);
++			// RDTG
++			// CustomData2
++			DetailBuilder.HideProperty(RetroreflectionIntensityProp);
+ 		}
+ 		break;
++		case MSM_Retroreflective:
++				{
++					DetailBuilder.HideProperty(SubSurfaceProfileProp);
++					DetailBuilder.HideProperty(ClearCoatProp);
++					DetailBuilder.HideProperty(ClearCoatRoughnessProp);
++					DetailBuilder.HideProperty(WorldNormalProp);
++					DetailBuilder.HideProperty(BackLitProp);
++					DetailBuilder.HideProperty(ClothProp);
++					DetailBuilder.HideProperty(EyeTangentProp);
++					DetailBuilder.HideProperty(IrisMaskProp);
++					DetailBuilder.HideProperty(IrisDistanceProp);
++				}
++		break;
+ 		case MSM_Subsurface:
+ 		case MSM_PreintegratedSkin:
+ 		case MSM_TwoSidedFoliage:
+@@ -191,6 +210,9 @@ void FPixelInspectorDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
+ 			DetailBuilder.HideProperty(EyeTangentProp);
+ 			DetailBuilder.HideProperty(IrisMaskProp);
+ 			DetailBuilder.HideProperty(IrisDistanceProp);
++			// RDTG
++			// CustomData2
++			DetailBuilder.HideProperty(RetroreflectionIntensityProp);
+ 		}
+ 		break;
+ 		case MSM_SubsurfaceProfile:
+@@ -204,6 +226,9 @@ void FPixelInspectorDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
+ 			DetailBuilder.HideProperty(EyeTangentProp);
+ 			DetailBuilder.HideProperty(IrisMaskProp);
+ 			DetailBuilder.HideProperty(IrisDistanceProp);
++			// RDTG
++			// CustomData2
++			DetailBuilder.HideProperty(RetroreflectionIntensityProp);
+ 		}
+ 		break;
+ 		case MSM_ClearCoat:
+@@ -217,6 +242,9 @@ void FPixelInspectorDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
+ 			DetailBuilder.HideProperty(EyeTangentProp);
+ 			DetailBuilder.HideProperty(IrisMaskProp);
+ 			DetailBuilder.HideProperty(IrisDistanceProp);
++			// RDTG
++			// CustomData2
++			DetailBuilder.HideProperty(RetroreflectionIntensityProp);
+ 		}
+ 		break;
+ 		case MSM_Hair:
+@@ -230,6 +258,9 @@ void FPixelInspectorDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
+ 			DetailBuilder.HideProperty(EyeTangentProp);
+ 			DetailBuilder.HideProperty(IrisMaskProp);
+ 			DetailBuilder.HideProperty(IrisDistanceProp);
++			// RDTG
++			// CustomData2
++			DetailBuilder.HideProperty(RetroreflectionIntensityProp);
+ 		}
+ 		break;
+ 		case MSM_Cloth:
+@@ -243,6 +274,9 @@ void FPixelInspectorDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
+ 			DetailBuilder.HideProperty(EyeTangentProp);
+ 			DetailBuilder.HideProperty(IrisMaskProp);
+ 			DetailBuilder.HideProperty(IrisDistanceProp);
++			// RDTG
++            // CustomData2
++            DetailBuilder.HideProperty(RetroreflectionIntensityProp);
+ 		}
+ 		break;
+ 		case MSM_Eye:
+@@ -255,6 +289,9 @@ void FPixelInspectorDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
+ 			DetailBuilder.HideProperty(WorldNormalProp);
+ 			DetailBuilder.HideProperty(BackLitProp);
+ 			DetailBuilder.HideProperty(ClothProp);
++			// RDTG
++            // CustomData2
++            DetailBuilder.HideProperty(RetroreflectionIntensityProp);
+ 		}
+ 		break;
+ 	}
+diff --git a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.cpp b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.cpp
+index aa59d9e0ea5f..a4dfd7eeb8f9 100644
+--- a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.cpp
++++ b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.cpp
+@@ -267,6 +267,9 @@ namespace PixelInspector
+ 			return EMaterialShadingModel::MSM_ThinTranslucent;
+ 		case PIXEL_INSPECTOR_SHADINGMODELID_SUBSTRATE:
+ 			return EMaterialShadingModel::MSM_Strata;
++			// RDTG
++		case PIXEL_INSPECTOR_SHADINGMODELID_RETROREFLECTIVE:
++			return EMaterialShadingModel::MSM_Retroreflective;
+ 		};
+ 		return EMaterialShadingModel::MSM_DefaultLit;
+ 	}
+@@ -361,6 +364,14 @@ namespace PixelInspector
+ 			IrisDistance = InCustomData.W;
+ 		}
+ 		break;
++		case EMaterialShadingModel::MSM_Retroreflective:
++		{
++			FVector EncodedSubSurfaceColor = FVector(InCustomData.X, InCustomData.Y, InCustomData.Z);
++			SubSurfaceColor = DecodeSubSurfaceColor(EncodedSubSurfaceColor);
++			Retroreflection = FVector3f(InCustomData.X, InCustomData.Y, InCustomData.Z);
++			RetroreflectionDistance = InCustomData.W;
++		}
++		break;
+ 		};
+ 	}
+ };
+diff --git a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.h b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.h
+index 1ab7f6bf2c4a..06f0ab073229 100644
+--- a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.h
++++ b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorResult.h
+@@ -25,6 +25,7 @@ class FFloat16Color;
+ #define PIXEL_INSPECTOR_SHADINGMODELID_SINGLELAYERWATER 10
+ #define PIXEL_INSPECTOR_SHADINGMODELID_THIN_TRANSLUCENT 11
+ #define PIXEL_INSPECTOR_SHADINGMODELID_SUBSTRATE 12
++#define PIXEL_INSPECTOR_SHADINGMODELID_RETROREFLECTIVE 13
+ #define PIXEL_INSPECTOR_SHADINGMODELID_MASK 0xF
+ 
+ namespace PixelInspector
+@@ -66,6 +67,13 @@ namespace PixelInspector
+ 			EyeTangent = FVector(0.0f);
+ 			IrisMask = 0.0f;
+ 			IrisDistance = 0.0f;
++
++			Retroreflection = FVector3f(0.0f, 0.0f, 0.0f);
++			RetroreflectionMask = 0.0f;
++			RetroreflectionIntensity = 0.0f;
++			RetroreflectionDepth = 1.f;
++
++			RetroreflectionDistance = 0.0f;
+ 		}
+ 		// Data Identification
+ 		int32 ViewUniqueId;
+@@ -135,6 +143,14 @@ namespace PixelInspector
+ 		float IrisMask;
+ 		float IrisDistance;
+ 
++		// RDTG
++		// Retroreflection Shading Model v1.35
++		FLinearColor Retroreflection;
++		float RetroreflectionMask;
++		float RetroreflectionIntensity;
++		float RetroreflectionDepth;
++		float RetroreflectionDistance;
++
+ 		/** Decodes final color from HDR input. */
+ 		void DecodeFinalColor(TArray<FLinearColor> &BufferFinalColorValue, float InGamma, bool bHasAlphaChannel);
+ 		void DecodeSceneColorBeforePostProcessing(TArray<FLinearColor> &BufferSceneColorValue);
+diff --git a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorView.cpp b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorView.cpp
+index dca8af51255c..e37efcafb0fe 100644
+--- a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorView.cpp
++++ b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorView.cpp
+@@ -41,6 +41,12 @@ UPixelInspectorView::UPixelInspectorView(const FObjectInitializer& ObjectInitial
+ 	EyeTangent = FVector(0.0f);
+ 	IrisMask = 0.0f;
+ 	IrisDistance = 0.0f;
++
++	// RDTG
++	Retroreflective = FLinearColor::Black;
++	RetroreflectiveMask = 0.0f;
++	RetroreflectiveIntensity = 0.0f;
++	RetroreflectiveDepth = 0.0f;
+ }
+ 
+ void UPixelInspectorView::SetFromResult(PixelInspector::PixelInspectorResult &Result)
+@@ -90,4 +96,9 @@ void UPixelInspectorView::SetFromResult(PixelInspector::PixelInspectorResult &Re
+ 	EyeTangent = Result.EyeTangent;
+ 	IrisMask = Result.IrisMask;
+ 	IrisDistance = Result.IrisDistance;
++	// RDTG
++	Retroreflective = Result.Retroreflection;
++	RetroreflectiveDepth = Result.RetroreflectionDepth;
++	RetroreflectiveIntensity = Result.RetroreflectionIntensity;
++	RetroreflectiveMask = Result.RetroreflectionMask;
+ }
+diff --git a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorView.h b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorView.h
+index 2c0836ecdcfe..22b4615cbbe0 100644
+--- a/Engine/Source/Editor/PixelInspector/Private/PixelInspectorView.h
++++ b/Engine/Source/Editor/PixelInspector/Private/PixelInspectorView.h
+@@ -131,6 +131,22 @@ class UPixelInspectorView : public UObject
+ 	UPROPERTY(VisibleAnywhere, category = GBufferD)
+ 	float IrisDistance;
+ 
++	/** From the GBufferD R Channel. */
++	UPROPERTY(VisibleAnywhere, category = GBufferD)
++	float RetroreflectiveMask;
++
++	/** From the GBufferD G Channel. */
++	UPROPERTY(VisibleAnywhere, category = GBufferD)
++	float RetroreflectiveIntensity;
++
++	/** From the GBufferD B Channel. */
++	UPROPERTY(VisibleAnywhere, category = GBufferD)
++	float RetroreflectiveDepth;
++
++	/** From the GBufferD RGB Channels. */
++	UPROPERTY(VisibleAnywhere, category = GBufferD)
++	FLinearColor Retroreflective;
++
+ 	void SetFromResult(PixelInspector::PixelInspectorResult &Result);
+ 	/*
+ 	//////////////////////////////////////////////////////////////////////////
+diff --git a/Engine/Source/Editor/UnrealEd/Private/Lightmass/LightmassRender.cpp b/Engine/Source/Editor/UnrealEd/Private/Lightmass/LightmassRender.cpp
+index e35d22898345..c4ff5ee4d6f1 100644
+--- a/Engine/Source/Editor/UnrealEd/Private/Lightmass/LightmassRender.cpp
++++ b/Engine/Source/Editor/UnrealEd/Private/Lightmass/LightmassRender.cpp
+@@ -575,6 +575,15 @@ public:
+ 		}
+ 		return false;
+ 	}
++	// RDTG
++	virtual bool HasRetroreflections() const override
++	{
++		if (MaterialInterface)
++		{
++			return MaterialInterface->HasRetroreflections();
++		}
++		return false;
++	}
+ 	virtual bool IsDitheredLODTransition() const override
+ 	{
+ 		if (MaterialInterface)
+diff --git a/Engine/Source/Editor/UnrealEd/Private/MaterialGraph.cpp b/Engine/Source/Editor/UnrealEd/Private/MaterialGraph.cpp
+index 13040bce372d..e7b91d85c322 100644
+--- a/Engine/Source/Editor/UnrealEd/Private/MaterialGraph.cpp
++++ b/Engine/Source/Editor/UnrealEd/Private/MaterialGraph.cpp
+@@ -191,6 +191,9 @@ void UMaterialGraph::RebuildGraphInternal(const TMap<UMaterialExpression*, TArra
+ 		MaterialInputs.Add(FMaterialInputInfo(FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_SubsurfaceColor, Material), MP_SubsurfaceColor, LOCTEXT("SubsurfaceToolTip", "Allows you to add a color to your Material to simulate shifts in color when light passes through the surface")));
+ 		MaterialInputs.Add(FMaterialInputInfo(FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_CustomData0, Material), MP_CustomData0, FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_CustomData0, Material)));
+ 		MaterialInputs.Add(FMaterialInputInfo(FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_CustomData1, Material), MP_CustomData1, FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_CustomData1, Material)));
++		//RDTG
++		MaterialInputs.Add(FMaterialInputInfo(FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_CustomData2, Material), MP_CustomData2, FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_CustomData2, Material)));
++		//MaterialInputs.Add(FMaterialInputInfo(FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_CustomData3, Material), MP_CustomData3, FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_CustomData3, Material)));
+ 		MaterialInputs.Add(FMaterialInputInfo(FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_AmbientOcclusion, Material), MP_AmbientOcclusion, LOCTEXT("AmbientOcclusionToolTip", "Simulate the self-shadowing that happens within crevices of a surface, or of a volume for volumetric clouds only")));
+ 		MaterialInputs.Add(FMaterialInputInfo(FMaterialAttributeDefinitionMap::GetDisplayNameForMaterial(MP_Refraction, Material), MP_Refraction, LOCTEXT("RefractionToolTip", "Takes in a texture or value that simulates the index of refraction of the surface")));
+ 
+diff --git a/Engine/Source/Editor/UnrealEd/Private/MaterialGraphNode_Root.cpp b/Engine/Source/Editor/UnrealEd/Private/MaterialGraphNode_Root.cpp
+index 4d67aeaceb4e..c9929ea9e737 100644
+--- a/Engine/Source/Editor/UnrealEd/Private/MaterialGraphNode_Root.cpp
++++ b/Engine/Source/Editor/UnrealEd/Private/MaterialGraphNode_Root.cpp
+@@ -50,7 +50,9 @@ void UMaterialGraphNode_Root::UpdateInputUseConstant(UEdGraphPin* Pin, bool bUse
+ 	case MP_ShadingModel:		break; // TODO, see notes in CreateInputPins
+ 	case MP_FrontMaterial:		break; // TODO, see notes in CreateInputPins
+ 	case MP_SurfaceThickness:	EditorOnlyData->SurfaceThickness.UseConstant = bUseConstant; break;
+-
++	// RDTG
++	case MP_CustomData2:		EditorOnlyData->RetroreflectionIntensity.UseConstant = bUseConstant; break;
++		
+ 	// TODO: Disabling these for the time being, as these values cause issues/artefacts when directly modified inline (UE-219232)
+ 	case MP_PixelDepthOffset:	EditorOnlyData->PixelDepthOffset.UseConstant = false; break;
+ 	case MP_Anisotropy:			EditorOnlyData->Anisotropy.UseConstant = false; break;
+@@ -120,7 +122,9 @@ void UMaterialGraphNode_Root::PinDefaultValueChanged(UEdGraphPin* Pin)
+ 	case MP_ShadingModel:		break; // TODO, see notes in CreateInputPins
+ 	case MP_FrontMaterial:		break; // TODO, see notes in CreateInputPins
+ 	case MP_SurfaceThickness:	EditorOnlyData->SurfaceThickness.DefaultValueChanged(Pin->DefaultValue); break;
+-
++	// RDTG
++	case MP_CustomData2:		EditorOnlyData->RetroreflectionIntensity.DefaultValueChanged(Pin->DefaultValue); break;
++		
+ 	// TODO: Disabling these for the time being, as these values cause issues/artefacts when directly modified inline (UE-219232)
+ 	// case MP_Anisotropy:			EditorOnlyData->Anisotropy.DefaultValueChanged(Pin->DefaultValue); break;
+ 	// case MP_PixelDepthOffset:	EditorOnlyData->PixelDepthOffset.DefaultValueChanged(Pin->DefaultValue); break;
+@@ -206,6 +210,8 @@ void UMaterialGraphNode_Root::CreateInputPins()
+ 			case MP_OpacityMask:
+ 			case MP_CustomData0:
+ 			case MP_CustomData1:
++			// RDTG
++			case MP_CustomData2:
+ 			case MP_AmbientOcclusion:
+ 			case MP_SurfaceThickness:
+ 				PinSubCategory = UMaterialGraphSchema::PSC_Red;
+@@ -301,11 +307,14 @@ void UMaterialGraphNode_Root::CreateInputPins()
+ 			case MP_SubsurfaceColor:	InputPin->DefaultValue = EditorOnlyData->SubsurfaceColor.GetDefaultValue(); break;
+ 			case MP_CustomData0:		InputPin->DefaultValue = EditorOnlyData->ClearCoat.GetDefaultValue(); break;
+ 			case MP_CustomData1:		InputPin->DefaultValue = EditorOnlyData->ClearCoatRoughness.GetDefaultValue(); break;
++
+ 			case MP_AmbientOcclusion:	InputPin->DefaultValue = EditorOnlyData->AmbientOcclusion.GetDefaultValue(); break;
+ 			case MP_Refraction:			InputPin->DefaultValue = EditorOnlyData->Refraction.GetDefaultValue(); break;
+ 			case MP_ShadingModel:		break; // TODO
+ 			case MP_FrontMaterial:		break; // TODO
+ 			case MP_SurfaceThickness:	InputPin->DefaultValue = EditorOnlyData->SurfaceThickness.GetDefaultValue(); break;
++			// RDTG
++			case MP_CustomData2:		InputPin->DefaultValue = EditorOnlyData->RetroreflectionIntensity.GetDefaultValue(); break;
+ 
+ 			// TODO: Disabling these for the time being, as these values cause issues/artefacts when directly modified inline (UE-219232)
+ 			// case MP_WorldPositionOffset:InputPin->DefaultValue = EditorOnlyData->WorldPositionOffset.GetDefaultValue(); break;
+diff --git a/Engine/Source/Editor/UnrealEd/Private/PreviewMaterial.cpp b/Engine/Source/Editor/UnrealEd/Private/PreviewMaterial.cpp
+index 62d8995e8d91..062236704cf6 100644
+--- a/Engine/Source/Editor/UnrealEd/Private/PreviewMaterial.cpp
++++ b/Engine/Source/Editor/UnrealEd/Private/PreviewMaterial.cpp
+@@ -1129,6 +1129,11 @@ void UMaterialEditorInstanceConstant::CopyBasePropertiesFromParent()
+ 	{
+ 		BasePropertyOverrides.bIsThinSurface = SourceInstance->IsThinSurface();
+ 	}
++	// RDTG
++	if (!BasePropertyOverrides.bOverride_bHasRetroreflections)
++	{
++		BasePropertyOverrides.bHasRetroreflections = SourceInstance->HasRetroreflections();
++	}
+ 	if (!BasePropertyOverrides.bOverride_OutputTranslucentVelocity)
+ 	{
+ 		BasePropertyOverrides.bOutputTranslucentVelocity = SourceInstance->IsTranslucencyWritingVelocity();
+diff --git a/Engine/Source/Runtime/CoreUObject/Private/UObject/CoreRedirects.cpp b/Engine/Source/Runtime/CoreUObject/Private/UObject/CoreRedirects.cpp
+index 32ddaf9e9499..218a524eb758 100644
+--- a/Engine/Source/Runtime/CoreUObject/Private/UObject/CoreRedirects.cpp
++++ b/Engine/Source/Runtime/CoreUObject/Private/UObject/CoreRedirects.cpp
+@@ -3545,6 +3545,8 @@ static void RegisterNativeRedirects46(TArray<FCoreRedirect>& Redirects)
+ 	EMaterialLightingModel.ValueChanges.Add(TEXT("MLM_PreintegratedSkin"), TEXT("MSM_PreintegratedSkin"));
+ 	EMaterialLightingModel.ValueChanges.Add(TEXT("MLM_Subsurface"), TEXT("MSM_Subsurface"));
+ 	EMaterialLightingModel.ValueChanges.Add(TEXT("MLM_Unlit"), TEXT("MSM_Unlit"));
++	// RDTG
++	EMaterialLightingModel.ValueChanges.Add(TEXT("MLM_Retroreflective"), TEXT("MSM_Retroreflective"));
+ 
+ 	FCoreRedirect& ESmartNavLinkDir = ENUM_REDIRECT("ESmartNavLinkDir", "/Script/Engine.ENavLinkDirection");
+ 	ESmartNavLinkDir.ValueChanges.Add(TEXT("ESmartNavLinkDir::BothWays"), TEXT("ENavLinkDirection::BothWays"));
+diff --git a/Engine/Source/Runtime/Engine/Classes/Engine/EngineTypes.h b/Engine/Source/Runtime/Engine/Classes/Engine/EngineTypes.h
+index 394ee6f823a4..7ddbe8d4edc1 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Engine/EngineTypes.h
++++ b/Engine/Source/Runtime/Engine/Classes/Engine/EngineTypes.h
+@@ -709,6 +709,7 @@ enum EMaterialShadingModel : int
+ 	MSM_SingleLayerWater		UMETA(DisplayName="SingleLayerWater"),
+ 	MSM_ThinTranslucent			UMETA(DisplayName="Thin Translucent"),
+ 	MSM_Strata					UMETA(DisplayName="Substrate", Hidden),
++	MSM_Retroreflective			UMETA(DisplayName="Retroreflective"),
+ 	/** Number of unique shading models. */
+ 	MSM_NUM						UMETA(Hidden),
+ 	/** Shading model will be determined by the Material Expression Graph,
+@@ -788,6 +789,7 @@ enum ESubstrateShadingModel : int
+ 	SSM_PostProcess,
+ 	SSM_Decal,
+ 	SSM_UI,
++	SSM_Retroreflective,
+ 	/** Number of unique shading models. */
+ 	SSM_NUM,
+ };
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/HLSLMaterialTranslator.cpp b/Engine/Source/Runtime/Engine/Private/Materials/HLSLMaterialTranslator.cpp
+index 8d0332696fdd..cee5445ba6d2 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/HLSLMaterialTranslator.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/HLSLMaterialTranslator.cpp
+@@ -327,6 +327,9 @@ struct FHLSLMaterialTranslator::FEnvironmentDefines
+ 	TArray<TPair<FString, int32>> SubstrateDefines;
+ 	TArray<TObjectPtr<UMaterialParameterCollection>> ParameterCollections;
+ 
++	// RDTG
++	bool bHasRetroreflectionMask;
++	
+ 	bool HasShadingModel(EMaterialShadingModel model) const
+ 	{
+ 		return (MaterialShadingModelEnabled & (1 << model)) != 0;
+@@ -429,6 +432,9 @@ struct FHLSLMaterialTranslator::FEnvironmentDefines
+ 		Ar << bMaterialEnableTranslucentLocalLightShadow;
+ 		Ar << bMaterialEnableTranslucentHighQualityLocalLightShadow;
+ 		Ar << bMaterialEnableTranslucentHighQualityDirectionalLightShadow;
++		// RDTG
++		Ar << bHasRetroreflectionMask;
++		
+ 		TArray<UObject*> ParameterCollectionObjects;
+ 		if (!Ar.IsLoading())
+ 		{
+@@ -771,6 +777,8 @@ FHLSLMaterialTranslator::FHLSLMaterialTranslator(FMaterial* InMaterial,
+ 	SharedPixelProperties[MP_Displacement] = true;
+ 	SharedPixelProperties[MP_CustomData0] = true;
+ 	SharedPixelProperties[MP_CustomData1] = true;
++	// RDTG
++	SharedPixelProperties[MP_CustomData2] = true;
+ 
+ 	for (int32 Frequency = 0; Frequency < SF_NumFrequencies; ++Frequency)
+ 	{
+@@ -1823,14 +1831,20 @@ void FHLSLMaterialTranslator::TranslateMaterial()
+ 				{
+ 					const bool bHasSSS = MaterialInterface && MaterialInterface->SubsurfaceProfile;
+ 					const bool bHasAnisotropy = EditorOnlyData->Anisotropy.IsConnected();
+-
++					const bool bHasRetroreflections = EditorOnlyData->RetroreflectionIntensity.IsConnected();
++					// RDTG
++					/** Added:
++					 * FExpressionInput& RetroreflectionIntensity
++					 * const bool bHasRetroreflections
++					 */
+ 					return UMaterialExpressionSubstrateShadingModels::CompileCommon(this,
+ 						EditorOnlyData->BaseColor, EditorOnlyData->Specular, EditorOnlyData->Metallic, EditorOnlyData->Roughness, EditorOnlyData->EmissiveColor,
+-						EditorOnlyData->Opacity, EditorOnlyData->SubsurfaceColor, EditorOnlyData->ClearCoat, EditorOnlyData->ClearCoatRoughness,
++						EditorOnlyData->Opacity, EditorOnlyData->SubsurfaceColor, EditorOnlyData->ClearCoat, EditorOnlyData->ClearCoatRoughness, EditorOnlyData->RetroreflectionIntensity,
+ 						EditorOnlyData->ShadingModelFromMaterialExpression, MaterialInterface->GetShadingModels().GetFirstShadingModel(),
+ 						*ThinTranslucentTransmittanceColor, *ThinTranslucentSurfaceCoverage,
+ 						*WaterScatteringCoefficients, *WaterAbsorptionCoefficients, *WaterPhaseG, *ColorScaleBehindWater,
+ 						bHasAnisotropy, EditorOnlyData->Anisotropy,
++						bHasRetroreflections,
+ 						EditorOnlyData->Normal, EditorOnlyData->Tangent,
+ 						*ClearCoatNormal, *CustomTangent,
+ 						bHasSSS, MaterialInterface->SubsurfaceProfile,
+@@ -1906,6 +1920,9 @@ void FHLSLMaterialTranslator::TranslateMaterial()
+ 	{
+ 		Chunk[MP_CustomData0] = Material->CompilePropertyAndSetMaterialProperty(MP_CustomData0, this);
+ 		Chunk[MP_CustomData1] = Material->CompilePropertyAndSetMaterialProperty(MP_CustomData1, this);
++		//RDTG
++		Chunk[MP_CustomData2] = Material->CompilePropertyAndSetMaterialProperty(MP_CustomData2, this);
++		//Chunk[MP_CustomData3] = Material->CompilePropertyAndSetMaterialProperty(MP_CustomData3, this);
+ 	}
+ 	Chunk[MP_AmbientOcclusion] = Material->CompilePropertyAndSetMaterialProperty(MP_AmbientOcclusion, this);
+ 
+@@ -2940,6 +2957,9 @@ void FHLSLMaterialTranslator::GetMaterialEnvironment(EShaderPlatform InPlatform,
+ 	OutEnvironment.SetDefine(TEXT("MATERIAL_ENABLE_TRANSLUCENT_HIGH_QUALITY_LOCAL_LIGHT_SHADOW"), EnvironmentDefines->bMaterialEnableTranslucentHighQualityLocalLightShadow);
+ 	OutEnvironment.SetDefine(TEXT("MATERIAL_ENABLE_TRANSLUCENT_HIGH_QUALITY_DIRECTIONAL_LIGHT_SHADOW"), EnvironmentDefines->bMaterialEnableTranslucentHighQualityDirectionalLightShadow);
+ 
++	// RDTG
++	OutEnvironment.SetDefine(TEXT("MATERIAL_USES_RETROREFLECTION"), EnvironmentDefines->bHasRetroreflectionMask);
++	
+ 	for (int i = 0; i < EnvironmentDefines->VirtualPageTypes.Num(); ++i)
+ 	{
+ 		if (EnvironmentDefines->VirtualPageTypes[i] & FEnvironmentDefines::TABLE_MESH_PAINT)
+@@ -3087,7 +3107,11 @@ void FHLSLMaterialTranslator::GetMaterialEnvironment(EShaderPlatform InPlatform,
+ 			OutEnvironment.SetDefine(TEXT("MATERIAL_SHADINGMODEL_THIN_TRANSLUCENT"), TEXT("1"));
+ 			bMaterialRequestsDualSourceBlending = true;
+ 		}
+-
++		// RDTG
++		if (EnvironmentDefines->HasShadingModel(MSM_Retroreflective))
++		{
++			OutEnvironment.SetDefine(TEXT("MATERIAL_SHADINGMODEL_RETROREFLECTIVE"), TEXT("1"));
++		}
+ 		if (EnvironmentDefines->bDisableForwardLocalLights)
+ 		{
+ 			OutEnvironment.SetDefine(TEXT("DISABLE_FORWARD_LOCAL_LIGHTS"), TEXT("1"));
+@@ -13327,6 +13351,8 @@ bool FHLSLMaterialTranslator::FSubstrateCompilationContext::SubstrateGenerateDer
+ 		bool bHasDecal = false;
+ 		bool bHasPostProcess = false;
+ 		bool bHasLightFunction = false;
++		// RDTG
++		bool bHasRetroreflection = false;
+ 		{
+ 			int VOpTopBranchCountTaken = 0;
+ 			int VOpBottomBranchCountTaken = 0;
+@@ -13961,6 +13987,9 @@ bool FHLSLMaterialTranslator::FSubstrateCompilationContext::SubstrateGenerateDer
+ 
+ 				Compiler->MaterialCompilationOutput.SubstrateMaterialCompilationOutput.bIsThin = CompilerMaterial->IsThinSurface() ? 1 : 0;
+ 
++				// RDTG - Revisit
++				Compiler->MaterialCompilationOutput.SubstrateMaterialCompilationOutput.bHasRetroreflections = CompilerMaterial->HasRetroreflections() ? 1 : 0;
++
+ 				// The order of ifs here is important.
+ 				if (CompilerMaterial->IsLightFunction())
+ 				{
+@@ -14189,6 +14218,8 @@ int32 FHLSLMaterialTranslator::SubstrateSlabBSDF(
+ 	const FString TangentCode = Tangent != INDEX_NONE ? *GetParameterCode(Tangent) : TEXT("NONE");
+ 	const FString ThicknessCode = GetParameterCode(Thickness);
+ 	const bool bIsThinSurface = Material->IsThinSurface();
++	// RDTG - Revisit
++	const bool bHasRetroreflections = Material->HasRetroreflections();
+ 
+ 	int32 ClearCoatUseSecondNormal = Constant(ClearCoatBottomNormal != Normal ? 1.0f : 0.0f);
+ 
+@@ -14333,13 +14364,13 @@ int32 FHLSLMaterialTranslator::SubstrateSlabBSDF(
+ 		*ThicknessCode
+ 	);
+ }
+-
++// RDTG
+ int32 FHLSLMaterialTranslator::SubstrateConversionFromLegacy(
+ 	bool bHasDynamicShadingModels,
+ 	int32 BaseColor, int32 Specular, int32 Metallic,
+ 	int32 Roughness, int32 Anisotropy,
+ 	int32 SubSurfaceColor, int32 SubSurfaceProfileId,
+-	int32 ClearCoat, int32 ClearCoatRoughness,
++	int32 ClearCoat, int32 ClearCoatRoughness, int32 RetroreflectionIntensity,
+ 	int32 EmissiveColor,
+ 	int32 Opacity,
+ 	int32 ThinTranslucentTransmittanceColor,
+@@ -16311,6 +16342,9 @@ void FHLSLMaterialTranslator::PrepareEnvironmentDefines()
+ 	EnvironmentDefines->bMaterialEnableTranslucentHighQualityLocalLightShadow = Material->GetTranslucentLocalLightShadowQuality() > 0;
+ 	EnvironmentDefines->bMaterialEnableTranslucentHighQualityDirectionalLightShadow = Material->GetTranslucentDirectionalLightShadowQuality() > 0;
+ 
++	// RDTG
++	EnvironmentDefines->bHasRetroreflectionMask = bUsesRetroreflection;
++	
+ 	// Count the number of VTStacks (each stack will allocate a feedback slot)
+ 	EnvironmentDefines->NumVirtualTextureSamples = VTStacks.Num();
+ 
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/HLSLMaterialTranslator.h b/Engine/Source/Runtime/Engine/Private/Materials/HLSLMaterialTranslator.h
+index 3c5847016b0f..0ad7c3006103 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/HLSLMaterialTranslator.h
++++ b/Engine/Source/Runtime/Engine/Private/Materials/HLSLMaterialTranslator.h
+@@ -427,6 +427,10 @@ protected:
+ 	/** True if this material write anisotropy material property */
+ 	uint32 bUsesAnisotropy : 1;
+ 
++	// RDTG
++	/** True if this material writes data into the Retroreflection custom output or the custom data gbuffer. */
++	uint32 bUsesRetroreflection : 1;
++
+ 	/** True if the material is detected as a Substrate material at compile time.
+ 	 * This is decoupled from runtime FMaterialResource::IsSubstrateMaterial but practically fine since this is only temporary until Substrate is the main shading system. Only really used at runtime for translucency dual source blending.
+ 	 */
+@@ -1342,7 +1346,7 @@ protected:
+ 		int32 BaseColor, int32 Specular, int32 Metallic,
+ 		int32 Roughness, int32 Anisotropy,
+ 		int32 SubSurfaceColor, int32 SubSurfaceProfileId,
+-		int32 ClearCoat, int32 ClearCoatRoughness,
++		int32 ClearCoat, int32 ClearCoatRoughness, int32 RetroreflectionIntensity,
+ 		int32 EmissiveColor,
+ 		int32 Opacity,
+ 		int32 ThinTranslucentTransmittanceColor,
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp b/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp
+index bcbe7ddd4df2..00fdef1487e0 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp
+@@ -1075,7 +1075,9 @@ void UMaterial::SetInitialValues()
+ 	bTangentSpaceNormal = true;
+ 	bUseLightmapDirectionality = true;
+ 	bAutomaticallySetUsageInEditor = true;
+-
++	// RDTG
++	bHasRetroreflections = true;
++	
+ 	bUseMaterialAttributes = false;
+ 	bCastRayTracedShadows = true;
+ 	bUseTranslucencyVertexFog = true;
+@@ -2214,7 +2216,9 @@ static void UpdatePropertyConnectedMask(const FSubstrateMaterialInfo& InSubstrat
+ 			| (1ull << MP_Opacity)
+ 			| (1ull << MP_ShadingModel)
+ 			| (1ull << MP_DiffuseColor)
+-			| (1ull << MP_SpecularColor);
++			| (1ull << MP_SpecularColor)
++		// RDTG
++			| (1ull << MP_CustomData2);
+ 
+ 		// Override the cached expression data with collected connection from InSubstrateMaterialInfo, but preserve all other input (e.g., refraction)
+ 		Out->PropertyConnectedMask &= ~ConnectionMask;
+@@ -3023,8 +3027,10 @@ void UMaterial::Serialize(FArchive& Ar)
+ 		GMaterialsThatNeedSamplerFixup.Set(this);
+ 	}
+ #endif // #if WITH_EDITOR
+-
+-	static_assert(MP_MAX == 35, "New material properties must have DoMaterialAttributeReorder called on them to ensure that any future reordering of property pins is correctly applied.");
++	// RDTG
++	// CustomData2
++	// Change MP_MAX back to 35 if you disable CustomData2!
++	static_assert(MP_MAX == 36, "New material properties must have DoMaterialAttributeReorder called on them to ensure that any future reordering of property pins is correctly applied.");
+ 
+ 	if (Ar.UEVer() < VER_UE4_MATERIAL_MASKED_BLENDMODE_TIDY)
+ 	{
+@@ -3361,6 +3367,9 @@ static void AddSurfaceSubstrateShadingModelFromMaterialShadingModels(FSubstrateM
+ 	if (InShadingModels.HasShadingModel(MSM_Eye))				{ OutInfo.AddShadingModel(ESubstrateShadingModel::SSM_Eye); }
+ 	if (InShadingModels.HasShadingModel(MSM_SingleLayerWater))	{ OutInfo.AddShadingModel(ESubstrateShadingModel::SSM_SingleLayerWater); }
+ 	if (InShadingModels.HasShadingModel(MSM_ThinTranslucent))	{ OutInfo.AddShadingModel(ESubstrateShadingModel::SSM_ThinTranslucent); }
++	// RDTG
++	// Temporarily setting this to default lit until we have a custom retroreflective SM for Substrate
++	if (InShadingModels.HasShadingModel(MSM_Retroreflective))	{ OutInfo.AddShadingModel(ESubstrateShadingModel::SSM_DefaultLit); }
+ }
+ 
+ static void AddSurfaceSubstrateShadingModelFromMaterialShadingModel(FSubstrateMaterialInfo& OutInfo, const EMaterialShadingModel& InShadingModel)
+@@ -3958,6 +3967,8 @@ bool UMaterial::ConvertMaterialToSubstrateMaterial(bool bAllowEmptyMaterialUpdat
+ 					ColorMatInputConnectionTo(EditorOnly->SubsurfaceColor,		ConvertNode->SubSurfaceColor,	MP_SubsurfaceColor);
+ 					ScalarMatInputConnectionTo(EditorOnly->ClearCoat,			ConvertNode->ClearCoat,			MP_CustomData0);
+ 					ScalarMatInputConnectionTo(EditorOnly->ClearCoatRoughness,	ConvertNode->ClearCoatRoughness,MP_CustomData1);
++					// RDTG
++					ScalarMatInputConnectionTo(EditorOnly->RetroreflectionIntensity,	ConvertNode->RetroreflectionIntensity,MP_CustomData2);
+ 					ScalarMatInputConnectionTo(EditorOnly->Opacity,				ConvertNode->Opacity,			MP_Opacity, SUBSTRATE_COPY_CONNECTION);	// We only copy, to keep Opacity on the root node in case BLEND_AlphaComposite is selected.
+ 					bRelinkCustomOutputNodes = true;
+ 			
+@@ -4080,6 +4091,8 @@ bool UMaterial::ConvertMaterialToSubstrateMaterial(bool bAllowEmptyMaterialUpdat
+ 					ColorMatInputConnectionTo(EditorOnly->SubsurfaceColor,		ConvertNode->SubSurfaceColor,	MP_SubsurfaceColor);
+ 					ScalarMatInputConnectionTo(EditorOnly->ClearCoat,			ConvertNode->ClearCoat,			MP_CustomData0);
+ 					ScalarMatInputConnectionTo(EditorOnly->ClearCoatRoughness,	ConvertNode->ClearCoatRoughness,MP_CustomData1);
++					// RDTG
++					ScalarMatInputConnectionTo(EditorOnly->RetroreflectionIntensity,	ConvertNode->RetroreflectionIntensity,MP_CustomData2);
+ 					ScalarMatInputConnectionTo(EditorOnly->Opacity,				ConvertNode->Opacity,			MP_Opacity, SUBSTRATE_COPY_CONNECTION);	// We only copy, to keep Opacity on the root node in case BLEND_AlphaComposite is selected.
+ 
+ 					// Add constant for the Unlit shading model
+@@ -6464,6 +6477,8 @@ bool UMaterial::GetExpressionInputDescription(EMaterialProperty InProperty, FMat
+ 	case MP_SubsurfaceColor: SetMaterialInputDescription(EditorOnly->SubsurfaceColor, false, OutDescription); return true;
+ 	case MP_CustomData0: SetMaterialInputDescription(EditorOnly->ClearCoat, false, OutDescription); return true;
+ 	case MP_CustomData1: SetMaterialInputDescription(EditorOnly->ClearCoatRoughness, false, OutDescription); return true;
++		// RDTG
++	case MP_CustomData2: SetMaterialInputDescription(EditorOnly->RetroreflectionIntensity, false, OutDescription); return true;
+ 	case MP_AmbientOcclusion: SetMaterialInputDescription(EditorOnly->AmbientOcclusion, false, OutDescription); return true;
+ 	case MP_Refraction: SetMaterialInputDescription(EditorOnly->Refraction, false, OutDescription); return true;
+ 	case MP_MaterialAttributes: SetMaterialInputDescription(EditorOnly->MaterialAttributes, false, OutDescription); return true;
+@@ -7093,6 +7108,8 @@ int32 UMaterial::CompilePropertyEx( FMaterialCompiler* Compiler, const FGuid& At
+ 		case MP_Anisotropy:				return EditorOnly->Anisotropy.CompileWithDefault(Compiler, Property);
+ 		case MP_CustomData0:			return EditorOnly->ClearCoat.CompileWithDefault(Compiler, Property);
+ 		case MP_CustomData1:			return EditorOnly->ClearCoatRoughness.CompileWithDefault(Compiler, Property);
++		// RDTG
++		case MP_CustomData2:				return EditorOnly->RetroreflectionIntensity.CompileWithDefault(Compiler, Property);
+ 		case MP_AmbientOcclusion:		return EditorOnly->AmbientOcclusion.CompileWithDefault(Compiler, Property);
+ 		case MP_Refraction:				return EditorOnly->Refraction.CompileWithDefault(Compiler, Property);
+ 		case MP_EmissiveColor:			return EditorOnly->EmissiveColor.CompileWithDefault(Compiler, Property);
+@@ -7325,6 +7342,12 @@ bool UMaterial::IsThinSurface() const
+ 	return bIsThinSurface != 0;
+ }
+ 
++// RDTG
++bool UMaterial::HasRetroreflections() const
++{
++	return bHasRetroreflections != 0;
++}
++
+ bool UMaterial::IsDitheredLODTransition() const
+ {
+ 	return DitheredLODTransition != 0;
+@@ -7564,7 +7587,7 @@ bool UMaterial::IsPropertyRelevantForMobile(EMaterialProperty InProperty)
+ 	}
+ 	return false;
+ }
+-
++// RDTG
+ static bool IsPropertyActive_Internal(EMaterialProperty InProperty,
+ 	EMaterialDomain Domain,
+ 	EBlendMode BlendMode,
+@@ -7576,6 +7599,7 @@ static bool IsPropertyActive_Internal(EMaterialProperty InProperty,
+ 	bool bUsesShadingModelFromMaterialExpression,
+ 	bool bIsTranslucencyWritingVelocity,
+ 	bool bIsThinSurface,
++	bool bHasRetroreflections,
+ 	bool bIsSupported,
+ 	bool bFrontMaterialIsConnected)
+ {
+@@ -7791,7 +7815,8 @@ static bool IsPropertyActive_Internal(EMaterialProperty InProperty,
+ 			Active = ShadingModels.IsLit() && (!bIsTranslucentBlendMode || !bIsVolumetricTranslucencyLightingMode);
+ 			break;
+ 		case MP_Anisotropy:
+-			Active = ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat }) && (!bIsTranslucentBlendMode || !bIsVolumetricTranslucencyLightingMode);
++			// RDTG
++			Active = ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat, MSM_Retroreflective }) && (!bIsTranslucentBlendMode || !bIsVolumetricTranslucencyLightingMode);
+ 			break;
+ 		case MP_Metallic:
+ 			// Subsurface models store opacity in place of Metallic in the GBuffer
+@@ -7804,13 +7829,20 @@ static bool IsPropertyActive_Internal(EMaterialProperty InProperty,
+ 			Active = ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat }) && (!bIsTranslucentBlendMode || !bIsVolumetricTranslucencyLightingMode);
+ 			break;
+ 		case MP_SubsurfaceColor:
+-			Active = ShadingModels.HasAnyShadingModel({ MSM_Subsurface, MSM_PreintegratedSkin, MSM_TwoSidedFoliage, MSM_Cloth });
++			 // RDTG
++			Active = ShadingModels.HasAnyShadingModel({ MSM_Subsurface, MSM_PreintegratedSkin, MSM_TwoSidedFoliage, MSM_Cloth, MSM_Retroreflective });
+ 			break;
+ 		case MP_CustomData0:
+-			Active = ShadingModels.HasAnyShadingModel({ MSM_ClearCoat, MSM_Hair, MSM_Cloth, MSM_Eye, MSM_SubsurfaceProfile });
++			// RDTG
++			Active = ShadingModels.HasAnyShadingModel({ MSM_ClearCoat, MSM_Hair, MSM_Cloth, MSM_Eye, MSM_SubsurfaceProfile, MSM_Retroreflective });
+ 			break;
+ 		case MP_CustomData1:
+-			Active = ShadingModels.HasAnyShadingModel({ MSM_ClearCoat, MSM_Eye });
++			// RDTG
++			Active = ShadingModels.HasAnyShadingModel({ MSM_ClearCoat, MSM_Eye, MSM_Retroreflective });
++			break;
++		// RDTG
++		case MP_CustomData2:
++			Active = ShadingModels.HasAnyShadingModel({MSM_Retroreflective});
+ 			break;
+ 		case MP_EmissiveColor:
+ 			// Emissive is always active, even for light functions and post process materials, 
+@@ -7854,6 +7886,7 @@ bool UMaterial::IsPropertyActiveInEditor(EMaterialProperty InProperty) const
+ {
+ 	// explicitly DON'T use getters for BlendMode/ShadingModel...these getters may return an optimized value
+ 	// we want the actual value that's been set by the user in the material editor
++	// RDTG
+ 	return IsPropertyActive_Internal(InProperty,
+ 		MaterialDomain,
+ 		BlendMode,
+@@ -7865,6 +7898,7 @@ bool UMaterial::IsPropertyActiveInEditor(EMaterialProperty InProperty) const
+ 		IsShadingModelFromMaterialExpression(),
+ 		IsTranslucencyWritingVelocity(),
+ 		IsThinSurface(),
++		HasRetroreflections(),
+ 		IsPropertySupported(InProperty),
+ 		GetEditorOnlyData()->FrontMaterial.IsConnected());
+ }
+@@ -7883,6 +7917,7 @@ bool UMaterial::IsPropertyActiveInDerived(EMaterialProperty InProperty, const UM
+ 	}
+ 	bFrontMaterialConnected = GetEditorOnlyData()->FrontMaterial.IsConnected();
+ #endif
++	// RDTG
+ 	return IsPropertyActive_Internal(InProperty,
+ 		MaterialDomain,
+ 		DerivedMaterial->GetBlendMode(),
+@@ -7894,6 +7929,7 @@ bool UMaterial::IsPropertyActiveInDerived(EMaterialProperty InProperty, const UM
+ 		DerivedMaterial->IsShadingModelFromMaterialExpression(),
+ 		IsTranslucencyWritingVelocity(),
+ 		IsThinSurface(),
++		HasRetroreflections(),
+ 		IsPropertySupported(InProperty),
+ 		bFrontMaterialConnected);
+ }
+@@ -8078,6 +8114,8 @@ UMaterialEditorOnlyData::UMaterialEditorOnlyData()
+ 	SubsurfaceColor.Constant = FLinearColor(FMaterialAttributeDefinitionMap::GetDefaultValue(MP_SubsurfaceColor));
+ 	ClearCoat.Constant = FMaterialAttributeDefinitionMap::GetDefaultValue(MP_CustomData0).X;
+ 	ClearCoatRoughness.Constant = FMaterialAttributeDefinitionMap::GetDefaultValue(MP_CustomData1).X;
++	// RDTG
++	RetroreflectionIntensity.Constant = FMaterialAttributeDefinitionMap::GetDefaultValue(MP_CustomData2).X;
+ 	AmbientOcclusion.Constant = FMaterialAttributeDefinitionMap::GetDefaultValue(MP_AmbientOcclusion).X;
+ 	Refraction.Constant = FMaterialAttributeDefinitionMap::GetDefaultValue(MP_Refraction).X;
+ 	SurfaceThickness.Constant = FMaterialAttributeDefinitionMap::GetDefaultValue(MP_SurfaceThickness).X;
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialAttributeDefinitionMap.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialAttributeDefinitionMap.cpp
+index dc15e548033a..fa699d1eb596 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialAttributeDefinitionMap.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialAttributeDefinitionMap.cpp
+@@ -19,6 +19,7 @@
+ #include "Serialization/ShaderKeyGenerator.h"
+ #include "SubstrateDefinitions.h"
+ #include "RenderUtils.h"
++#include "Materials/MaterialExpressionRetroreflectionCustomOutput.h"
+ 
+ #define LOCTEXT_NAMESPACE "MaterialShared"
+ 
+@@ -353,6 +354,9 @@ void FMaterialAttributeDefinitionMap::InitializeAttributeMap()
+ 	Add(FGuid(0x42BDD2E0, 0xBE714189, 0xA0984BC3, 0xDD0BE872), TEXT("SurfaceThickness"),		MP_SurfaceThickness,		MCT_Float,  FVector4(SUBSTRATE_LAYER_DEFAULT_THICKNESS_CM, 0, 0, 0), SF_Pixel);
+ 	Add(FGuid(0x5973A03E, 0x13A74E08, 0x92D0CEDD, 0xF2936CF8), TEXT("FrontMaterial"),			MP_FrontMaterial,			MCT_Substrate, FVector4(0,0,0,0),	SF_Pixel, INDEX_NONE, false, &CompileSubstrateBlendFunction);
+ 
++	// RDTG
++	Add(FGuid(0xD2033FFF, 0xE6DA21BD, 0xD0472FFB, 0xC4D13370), TEXT("CustomData2"), MP_CustomData2,			MCT_Float, FVector4(.5, 0, 0, 0), SF_Pixel);
++	
+ 	// Used when compiling material with execution pins, which are compiling all attributes together
+ 	Add(FGuid(0xE0ED040B, 0x82794D93, 0xBD2D59B2, 0xA5BBF41C), TEXT("MaterialAttributes"),		MP_MaterialAttributes,		MCT_MaterialAttributes, FVector4(0,0,0,0), SF_Pixel, INDEX_NONE, bHideAttribute);
+ 
+@@ -385,6 +389,11 @@ void FMaterialAttributeDefinitionMap::InitializeAttributeMap()
+ 	AddCustomAttribute(FGuid(0xAAA1D0E0, 0xE312458E, 0xF3556BAD, 0xA01277CD), UMaterialExpressionThinTranslucentMaterialOutput::StaticClass(), "ThinTranslucentSurfaceCoverage", "GetThinTranslucentMaterialOutput", 1, MCT_Float, FVector4(1, 0, 0, 0), SF_Pixel);
+ 	AddCustomAttribute(FGuid(0xDB380E51, 0xBDED47B6, 0xB185A8BE, 0x8EACBFA4), UMaterialExpressionFirstPersonOutput::StaticClass(), "FirstPersonInterpolationAlpha", "GetFirstPersonOutput", 0, MCT_Float, FVector4(1, 0, 0, 0), SF_Vertex, true /*bNeedsPreviousFrameEvaluation*/);
+ 	AddCustomAttribute(FGuid(0x6B1237CA, 0x1B8C43C2, 0xA9C8A020, 0x430F1258), UMaterialExpressionMaterialCache::StaticClass(), "MaterialCache", "MaterialCache", 0, MCT_Float4, FVector4(0, 0, 0, 0), SF_Pixel);
++
++	// RDTG
++	// Retroreflection custom output
++	AddCustomAttribute(FGuid(0x7b810e32, 0x9b313f9b, 0x9c54353c, 0x008c8638), UMaterialExpressionRetroreflectionCustomOutput::StaticClass(), "Retroreflection", "GetRetroreflection", 0, MCT_Float4, FVector4(0, 0, 1, 0), SF_Pixel);
++
+ }
+ 
+ void FMaterialAttributeDefinitionMap::Add(const FGuid& AttributeID, const FString& AttributeName, EMaterialProperty Property,
+@@ -444,6 +453,7 @@ FText FMaterialAttributeDefinitionMap::GetAttributeOverrideForMaterial(const FGu
+ 	case MP_EmissiveColor:
+ 		return Material->IsUIMaterial() ? LOCTEXT("UIOutputColor", "Final Color") : LOCTEXT("EmissiveColor", "Emissive Color");
+ 	case MP_Opacity:
++		CustomPinNames.Add({MSM_Retroreflective, "Retroreflection Color Intensity"});
+ 		return bSubstrateEnabled ? LOCTEXT("OpacityOverride", "Opacity Override") : LOCTEXT("Opacity", "Opacity");
+ 	case MP_OpacityMask:
+ 		return LOCTEXT("OpacityMask", "Opacity Mask");
+@@ -482,6 +492,8 @@ FText FMaterialAttributeDefinitionMap::GetAttributeOverrideForMaterial(const FGu
+ 			return LOCTEXT("Extinction", "Extinction");
+ 		}
+ 		CustomPinNames.Add({ MSM_Cloth, LOCTEXT("FuzzColor", "Fuzz Color").ToString() });
++		// RDTG
++		CustomPinNames.Add({MSM_Retroreflective, "Retroreflection"});
+ 		return FText::FromString(GetPinNameFromShadingModelField(Material->GetShadingModels(), CustomPinNames, LOCTEXT("SubsurfaceColor", "Subsurface Color").ToString()));
+ 	case MP_CustomData0:
+ 		CustomPinNames.Add({ MSM_ClearCoat, LOCTEXT("ClearCoat", "Clear Coat").ToString() });
+@@ -489,11 +501,19 @@ FText FMaterialAttributeDefinitionMap::GetAttributeOverrideForMaterial(const FGu
+ 		CustomPinNames.Add({ MSM_Cloth, LOCTEXT("Cloth", "Cloth").ToString() });
+ 		CustomPinNames.Add({ MSM_Eye, LOCTEXT("IrisMask", "Iris Mask").ToString() });
+ 		CustomPinNames.Add({ MSM_SubsurfaceProfile, LOCTEXT("Curvature", "Curvature").ToString() });
++		// RDTG
++		CustomPinNames.Add({MSM_Retroreflective, "Retroreflection Mask"});
+ 		return FText::FromString(GetPinNameFromShadingModelField(Material->GetShadingModels(), CustomPinNames, LOCTEXT("CustomData0", "Custom Data 0").ToString()));
+ 	case MP_CustomData1:
+ 		CustomPinNames.Add({ MSM_ClearCoat, LOCTEXT("ClearCoatRoughness", "Clear Coat Roughness").ToString() });
+ 		CustomPinNames.Add({ MSM_Eye, LOCTEXT("IrisDistance", "Iris Distance").ToString() });
++		// RDTG
++		CustomPinNames.Add({MSM_Retroreflective, "Retroreflection Falloff"});
+ 		return FText::FromString(GetPinNameFromShadingModelField(Material->GetShadingModels(), CustomPinNames, LOCTEXT("CustomData1", "Custom Data 1").ToString()));
++	// RDTG
++	case MP_CustomData2:
++		CustomPinNames.Add({MSM_Retroreflective, "Retroreflection Intensity"});
++		return FText::FromString(GetPinNameFromShadingModelField(Material->GetShadingModels(), CustomPinNames, LOCTEXT("CustomData2", "Custom Data 2").ToString()));
+ 	case MP_AmbientOcclusion:
+ 		return LOCTEXT("AmbientOcclusion", "Ambient Occlusion");
+ 	case MP_Refraction:
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialCachedData.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialCachedData.cpp
+index 0bd108aacff1..4e61bd7ff932 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialCachedData.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialCachedData.cpp
+@@ -57,6 +57,8 @@ const FMaterialCachedParameterEntry FMaterialCachedParameterEntry::EmptyData{};
+ const FMaterialCachedExpressionData FMaterialCachedExpressionData::EmptyData{};
+ const FMaterialCachedExpressionEditorOnlyData FMaterialCachedExpressionEditorOnlyData::EmptyData{};
+ 
++// RDTG
++// This may need changing from 8 to 9
+ static_assert((uint64)(EMaterialProperty::MP_MaterialAttributes)-1 < (8 * sizeof(FMaterialCachedExpressionData::PropertyConnectedMask)), "PropertyConnectedMask cannot contain entire EMaterialProperty enumeration.");
+ 
+ FMaterialCachedExpressionData::FMaterialCachedExpressionData()
+@@ -707,6 +709,8 @@ void FMaterialCachedExpressionData::UpdateForExpressions(const FMaterialCachedEx
+ 			SetMatAttributeConditionally(EMaterialProperty::MP_SubsurfaceColor, MakeMatAttributes->SubsurfaceColor.IsConnected());
+ 			SetMatAttributeConditionally(EMaterialProperty::MP_CustomData0, MakeMatAttributes->ClearCoat.IsConnected());
+ 			SetMatAttributeConditionally(EMaterialProperty::MP_CustomData1, MakeMatAttributes->ClearCoatRoughness.IsConnected());
++			// RDTG
++			SetMatAttributeConditionally(EMaterialProperty::MP_CustomData2, MakeMatAttributes->RetroreflectionIntensity.IsConnected());
+ 			SetMatAttributeConditionally(EMaterialProperty::MP_AmbientOcclusion, MakeMatAttributes->AmbientOcclusion.IsConnected());
+ 			SetMatAttributeConditionally(EMaterialProperty::MP_Refraction, MakeMatAttributes->Refraction.IsConnected());
+ 			SetMatAttributeConditionally(EMaterialProperty::MP_CustomizedUVs0, MakeMatAttributes->CustomizedUVs[0].IsConnected());
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressionSubstrate.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressionSubstrate.cpp
+index 9c66615984b5..0570f57bf427 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressionSubstrate.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressionSubstrate.cpp
+@@ -214,6 +214,8 @@ FExpressionInput* UMaterialExpressionSubstrateShadingModels::GetInput(int32 Inpu
+ 	case 18: return &CustomTangent;
+ 	case 19: return &ThinTranslucentSurfaceCoverage;
+ 	case 20: return &ShadingModel;
++	// RDTG
++	case 21: return &RetroreflectionIntensity;
+ 	default: return nullptr;
+ 	}
+ }
+@@ -222,14 +224,19 @@ FExpressionInput* UMaterialExpressionSubstrateShadingModels::GetInput(int32 Inpu
+ 																					int32 CodeChunkResult = Code;\
+ 																					Compiler->PopMaterialAttribute();
+ 
+-
++// RDTG
++/** Added:
++ * FExpressionInput& RetroreflectionIntensity
++ * const bool bHasRetroreflections
++ */
+ int32 UMaterialExpressionSubstrateShadingModels::CompileCommon(class FMaterialCompiler* Compiler,
+ 	FExpressionInput& BaseColor, FExpressionInput& Specular, FExpressionInput& Metallic, FExpressionInput& Roughness, FExpressionInput& EmissiveColor,
+-	FExpressionInput& Opacity, FExpressionInput& SubSurfaceColor, FExpressionInput& ClearCoat, FExpressionInput& ClearCoatRoughness,
++	FExpressionInput& Opacity, FExpressionInput& SubSurfaceColor, FExpressionInput& ClearCoat, FExpressionInput& ClearCoatRoughness, FExpressionInput& RetroreflectionIntensity,
+ 	FExpressionInput& ShadingModel, TEnumAsByte<enum EMaterialShadingModel> ShadingModelOverride,
+ 	FExpressionInput& TransmittanceColor, FExpressionInput& ThinTranslucentSurfaceCoverage,
+ 	FExpressionInput& WaterScatteringCoefficients, FExpressionInput& WaterAbsorptionCoefficients, FExpressionInput& WaterPhaseG, FExpressionInput& ColorScaleBehindWater,
+ 	const bool bHasAnisotropy, FExpressionInput& Anisotropy,
++	const bool bHasRetroreflections,
+ 	FExpressionInput& Normal, FExpressionInput& Tangent,
+ 	FExpressionInput& ClearCoatNormal, FExpressionInput& CustomTangent,
+ 	const bool bHasSSS, USubsurfaceProfile* SSSProfile,
+@@ -326,6 +333,8 @@ int32 UMaterialExpressionSubstrateShadingModels::CompileCommon(class FMaterialCo
+ 
+ 	LEGACY_DIRECT_ATTRIBUTE_MAPPING(ClearCoatCodeChunk, MP_CustomData0, CompileWithDefaultFloat1(Compiler, ClearCoat, 1.0f, EditorOnlyData ? &EditorOnlyData->ClearCoat : nullptr));
+ 	LEGACY_DIRECT_ATTRIBUTE_MAPPING(ClearCoatRoughnessCodeChunk, MP_CustomData1, CompileWithDefaultFloat1(Compiler, ClearCoatRoughness, 0.1f, EditorOnlyData ? &EditorOnlyData->ClearCoatRoughness: nullptr));
++	// RDTG
++	LEGACY_DIRECT_ATTRIBUTE_MAPPING(RetroreflectionIntensityCodeChunk, MP_CustomData2, CompileWithDefaultFloat1(Compiler, RetroreflectionIntensity, 0.1f, EditorOnlyData ? &EditorOnlyData->RetroreflectionIntensity: nullptr));
+ 
+ 	int32 ShadingModelCodeChunk = ShadingModel.IsConnected() ? CompileWithDefaultFloat1(Compiler, ShadingModel, float(MSM_DefaultLit)) : Compiler->Constant(float(ShadingModelOverride));
+ 	int32 ShadingModelCount = Compiler->GetMaterialShadingModels().CountShadingModels();
+@@ -345,6 +354,9 @@ int32 UMaterialExpressionSubstrateShadingModels::CompileCommon(class FMaterialCo
+ 		// Clear Coat / Custom
+ 		ClearCoatCodeChunk,
+ 		ClearCoatRoughnessCodeChunk,
++		// RDTG
++		// Retroreflection
++		RetroreflectionIntensityCodeChunk,
+ 		// Misc
+ 		EmissiveCodeChunk,
+ 		OpacityCodeChunk,
+@@ -368,16 +380,21 @@ int32 UMaterialExpressionSubstrateShadingModels::CompileCommon(class FMaterialCo
+ 
+ 	return OutputCodeChunk;
+ }
+-
++// RDTG
++/** Added:
++ * FExpressionInput& RetroreflectionIntensity
++ * const bool bHasRetroreflections
++ */
+ int32 UMaterialExpressionSubstrateShadingModels::Compile(class FMaterialCompiler* Compiler, int32 OutputIndex)
+ {
+ 	return UMaterialExpressionSubstrateShadingModels::CompileCommon(Compiler,
+ 		BaseColor, Specular, Metallic, Roughness, EmissiveColor,
+-		Opacity, SubSurfaceColor, ClearCoat, ClearCoatRoughness,
++		Opacity, SubSurfaceColor, ClearCoat, ClearCoatRoughness, RetroreflectionIntensity,
+ 		ShadingModel, ShadingModelOverride,
+ 		TransmittanceColor, ThinTranslucentSurfaceCoverage,
+ 		WaterScatteringCoefficients, WaterAbsorptionCoefficients, WaterPhaseG, ColorScaleBehindWater,
+ 		HasAnisotropy(), Anisotropy,
++		HasRetroreflections(),
+ 		Normal, Tangent,
+ 		ClearCoatNormal, CustomTangent,
+ 		HasSSS(), SubsurfaceProfile);
+@@ -427,6 +444,8 @@ EMaterialValueType UMaterialExpressionSubstrateShadingModels::GetInputValueType(
+ 	else if (InputIndex == 19) return MCT_Float1; // ThinTranslucentSurfaceCoverage
+ 	else if (InputIndex == 20) return MCT_ShadingModel; // ShadingModel
+ 	else if (InputIndex == 21) return MCT_ShadingModel; // EMaterialShadingModel with ShowAsInputPin seems to always show at the bottom
++	// RDTG
++	else if (InputIndex == 22) return MCT_Float1; // RetroreflectionIntensity/Custom2
+ 
+ 	check(false);
+ 	return MCT_Float1;
+@@ -553,6 +572,8 @@ void UMaterialExpressionSubstrateShadingModels::GatherSubstrateMaterialInfo(FSub
+ 	if (SubSurfaceColor.IsConnected()) { SubstrateMaterialInfo.AddPropertyConnected(MP_SubsurfaceColor); }
+ 	if (ClearCoat.IsConnected()) { SubstrateMaterialInfo.AddPropertyConnected(MP_CustomData0); }
+ 	if (ClearCoatRoughness.IsConnected()) { SubstrateMaterialInfo.AddPropertyConnected(MP_CustomData1); }
++	// RDTG
++	if (RetroreflectionIntensity.IsConnected()) { SubstrateMaterialInfo.AddPropertyConnected(MP_CustomData2); }
+ 	if (Opacity.IsConnected()) { SubstrateMaterialInfo.AddPropertyConnected(MP_Opacity); }
+ 
+ 	if (ShadingModel.IsConnected())
+@@ -577,6 +598,9 @@ void UMaterialExpressionSubstrateShadingModels::GatherSubstrateMaterialInfo(FSub
+ 		if (ShadingModelOverride == MSM_Eye) { SubstrateMaterialInfo.AddShadingModel(ESubstrateShadingModel::SSM_Eye); }
+ 		if (ShadingModelOverride == MSM_SingleLayerWater) { SubstrateMaterialInfo.AddShadingModel(ESubstrateShadingModel::SSM_SingleLayerWater); }
+ 		if (ShadingModelOverride == MSM_ThinTranslucent) { SubstrateMaterialInfo.AddShadingModel(ESubstrateShadingModel::SSM_ThinTranslucent); }
++		// RDTG
++		// Temporarily setting this to default lit until we have a custom retroreflective SM for Substrate
++		if (ShadingModelOverride == MSM_Retroreflective) { SubstrateMaterialInfo.AddShadingModel(ESubstrateShadingModel::SSM_DefaultLit); }
+ 	}
+ 
+ 	if (SubsurfaceProfile)
+@@ -749,6 +773,11 @@ bool UMaterialExpressionSubstrateShadingModels::HasAnisotropy() const
+ 	return Anisotropy.IsConnected();
+ }
+ 
++bool UMaterialExpressionSubstrateShadingModels::HasRetroreflections() const
++{
++	return RetroreflectionIntensity.IsConnected();
++}
++
+ #endif // WITH_EDITOR
+ 
+ 
+@@ -3948,6 +3977,10 @@ int32 UMaterialExpressionSubstrateConvertMaterialAttributes::CompileCommon(class
+ 		// Clear Coat / Custom
+ 		MaterialAttributes.CompileWithDefault(Compiler, FMaterialAttributeDefinitionMap::GetID(MP_CustomData0)),// Clear coat
+ 		MaterialAttributes.CompileWithDefault(Compiler, FMaterialAttributeDefinitionMap::GetID(MP_CustomData1)),// Clear coat roughness
++		// RDTG
++		// Retroreflection
++		// TODO: Add the damn customdata2 parameter to substrate conversion function(s) so this will work!
++		MaterialAttributes.CompileWithDefault(Compiler, FMaterialAttributeDefinitionMap::GetID(MP_CustomData2)),// Retroreflection Intensity
+ 		// Misc
+ 		MaterialAttributes.CompileWithDefault(Compiler, FMaterialAttributeDefinitionMap::GetID(MP_EmissiveColor)),
+ 		OpacityCodeChunk,
+@@ -4061,6 +4094,8 @@ void UMaterialExpressionSubstrateConvertMaterialAttributes::GatherSubstrateMater
+ 	if (FMaterialAttributeDefinitionMap::IsAttributeInBitmask(Cached, MP_SubsurfaceColor)) { SubstrateMaterialInfo.AddPropertyConnected(MP_SubsurfaceColor); }
+ 	if (FMaterialAttributeDefinitionMap::IsAttributeInBitmask(Cached, MP_CustomData0)) { SubstrateMaterialInfo.AddPropertyConnected(MP_CustomData0); }
+ 	if (FMaterialAttributeDefinitionMap::IsAttributeInBitmask(Cached, MP_CustomData1)) { SubstrateMaterialInfo.AddPropertyConnected(MP_CustomData1); }
++	// RDTG
++	if (FMaterialAttributeDefinitionMap::IsAttributeInBitmask(Cached, MP_CustomData2)) { SubstrateMaterialInfo.AddPropertyConnected(MP_CustomData2); }
+ 	if (FMaterialAttributeDefinitionMap::IsAttributeInBitmask(Cached, MP_Opacity)) { SubstrateMaterialInfo.AddPropertyConnected(MP_Opacity); }
+ 
+ 	if (FMaterialAttributeDefinitionMap::IsAttributeInBitmask(Cached, MP_ShadingModel) || ShadingModelOverride == MSM_FromMaterialExpression)
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp
+index 65e82e6d3d34..b15cd093e079 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp
+@@ -58,6 +58,8 @@
+ #include "Materials/MaterialExpressionArctangent2Fast.h"
+ #include "Materials/MaterialExpressionAtmosphericFogColor.h"
+ #include "Materials/MaterialExpressionBentNormalCustomOutput.h"
++// RDTG
++#include "Materials/MaterialExpressionRetroreflectionCustomOutput.h"
+ #include "Materials/MaterialExpressionBindlessSwitch.h"
+ #include "Materials/MaterialExpressionBlackBody.h"
+ #include "Materials/MaterialExpressionBlendMaterialAttributes.h"
+@@ -5906,6 +5908,8 @@ FExpressionInput* UMaterialExpressionMakeMaterialAttributes::GetExpressionInput(
+ 	case MP_CustomizedUVs7: return &CustomizedUVs[7];
+ 	case MP_CustomData0: return &ClearCoat;
+ 	case MP_CustomData1: return &ClearCoatRoughness;
++	// RDTG
++	case MP_CustomData2: return &RetroreflectionIntensity;
+ 	default: break; // We don't support this property.
+ 	}
+ 
+@@ -5951,6 +5955,8 @@ uint64 UMaterialExpressionMakeMaterialAttributes::GetConnectedInputs() const
+ 	if (Refraction.Expression != nullptr) 				Out |= (1ull << uint64(MP_Refraction));
+ 	if (PixelDepthOffset.Expression != nullptr) 		Out |= (1ull << uint64(MP_PixelDepthOffset));
+ 	if (ShadingModel.Expression != nullptr) 			Out |= (1ull << uint64(MP_ShadingModel));
++	// RDTG
++	if (RetroreflectionIntensity.Expression != nullptr) Out |= (1ull << uint64(MP_CustomData2));
+ 	return Out;
+ }
+ 
+@@ -5958,8 +5964,10 @@ int32 UMaterialExpressionMakeMaterialAttributes::Compile(class FMaterialCompiler
+ {
+ 	int32 Ret = INDEX_NONE;
+ 	UMaterialExpression* Expression = nullptr;
+-
+- 	static_assert(MP_MAX == 35, 
++	// RDTG
++	// CustomData2
++	// Change MP_MAX back to 35 if you disable CustomData2!
++ 	static_assert(MP_MAX == 36, 
+ 		"New material properties should be added to the end of the inputs for this expression. \
+ 		The order of properties here should match the material results pins, the make material attriubtes node inputs and the mapping of IO indices to properties in GetMaterialPropertyFromInputOutputIndex().\
+ 		Insertions into the middle of the properties or a change in the order of properties will also require that existing data is fixed up in DoMaterialAttributeReorder().\
+@@ -5988,6 +5996,8 @@ int32 UMaterialExpressionMakeMaterialAttributes::Compile(class FMaterialCompiler
+ 	case MP_Refraction: Ret = Refraction.Compile(Compiler); Expression = Refraction.Expression; break;
+ 	case MP_PixelDepthOffset: Ret = PixelDepthOffset.Compile(Compiler); Expression = PixelDepthOffset.Expression; break;
+ 	case MP_ShadingModel: Ret = ShadingModel.Compile(Compiler); Expression = ShadingModel.Expression; break;
++		// RDTG
++	case MP_CustomData2: Ret = RetroreflectionIntensity.Compile(Compiler); Expression = RetroreflectionIntensity.Expression; break;
+ 	};
+ 
+ 	if (Property >= MP_CustomizedUVs0 && Property <= MP_CustomizedUVs7)
+@@ -6032,7 +6042,10 @@ UMaterialExpressionBreakMaterialAttributes::UMaterialExpressionBreakMaterialAttr
+ 	bShowOutputNameOnPin = true;
+ 	bShowMaskColorsOnPin = false;
+ 
+- 	static_assert(MP_MAX == 35, 
++	// RDTG
++	// CustomData2
++	// Change MP_MAX back to 35 if you disable CustomData2!
++ 	static_assert(MP_MAX == 36, 
+ 		"New material properties should be added to the end of the outputs for this expression. \
+ 		The order of properties here should match the material results pins, the make material attributes node inputs and the mapping of IO indices to properties in GetMaterialPropertyFromInputOutputIndex().\
+ 		Insertions into the middle of the properties or a change in the order of properties will also require that existing data is fixed up in DoMaterialAttributesReorder().\
+@@ -6064,6 +6077,9 @@ UMaterialExpressionBreakMaterialAttributes::UMaterialExpressionBreakMaterialAttr
+ 	Outputs.Add(FExpressionOutput(TEXT("PixelDepthOffset"), 1, 1, 0, 0, 0));
+ 	Outputs.Add(FExpressionOutput(TEXT("ShadingModel"), 0, 0, 0, 0, 0));
+ 	Outputs.Add(FExpressionOutput(TEXT("Displacement"), 1, 1, 0, 0, 0));
++	// RDTG
++	// CustomData2
++	Outputs.Add(FExpressionOutput(TEXT("RetroreflectionIntensity"), 1, 1, 0, 0, 0));
+ #endif
+ }
+ 
+@@ -6102,8 +6118,11 @@ void UMaterialExpressionBreakMaterialAttributes::Serialize(FStructuredArchive::F
+ 			Outputs[OutputIndex].SetMask(1, 1, 1, 0, 0);
+ 		}
+ 
+-		Outputs[OutputIndex].SetMask(1, 1, 0, 0, 0); ++OutputIndex;// PixelDepthOffset
+-		Outputs[OutputIndex].SetMask(0, 0, 0, 0, 0); // ShadingModelFromMaterialExpression
++		Outputs[OutputIndex].SetMask(1, 1, 0, 0, 0); ++OutputIndex; // PixelDepthOffset
++		Outputs[OutputIndex].SetMask(0, 0, 0, 0, 0);  ++OutputIndex; // ShadingModelFromMaterialExpression
++		// RDTG
++		// CustomData2
++		Outputs[OutputIndex].SetMask(1, 1, 0, 0, 0); // Retroreflection Intensity
+ 	}
+ #endif // WITH_EDITOR
+ }
+@@ -6142,6 +6161,8 @@ void UMaterialExpressionBreakMaterialAttributes::BuildPropertyToIOIndexMap()
+ 		PropertyToIOIndexMap.Add(MP_PixelDepthOffset,		24);
+ 		PropertyToIOIndexMap.Add(MP_ShadingModel,			25);
+ 		PropertyToIOIndexMap.Add(MP_Displacement,			26);
++		// RDTG
++		PropertyToIOIndexMap.Add(MP_CustomData2,				    	27);
+ 	}
+ }
+ 
+@@ -21341,7 +21362,6 @@ FExpressionInput* UMaterialExpressionClearCoatNormalCustomOutput::GetInput(int32
+ }
+ #endif // WITH_EDITOR
+ 
+-
+ ///////////////////////////////////////////////////////////////////////////////
+ // Bent Normal Output
+ ///////////////////////////////////////////////////////////////////////////////
+@@ -21382,6 +21402,46 @@ FExpressionInput* UMaterialExpressionBentNormalCustomOutput::GetInput(int32 Inpu
+ 
+ #endif // WITH_EDITOR
+ 
++///////////////////////////////////////////////////////////////////////////////
++// Retroreflection custom output
++// RDTG
++///////////////////////////////////////////////////////////////////////////////
++
++UMaterialExpressionRetroreflectionCustomOutput::UMaterialExpressionRetroreflectionCustomOutput(const FObjectInitializer& ObjectInitializer)
++: Super(ObjectInitializer)
++{
++#if WITH_EDITORONLY_DATA
++	FText NAME_Utility(LOCTEXT("Utility", "Utility"));
++	MenuCategories.Add(NAME_Utility);
++	bCollapsed = false;
++#endif // WITH_EDITORONLY_DATA
++}
++	 
++#if WITH_EDITOR
++int32  UMaterialExpressionRetroreflectionCustomOutput::Compile(class FMaterialCompiler* Compiler, int32 OutputIndex)
++{
++	if (Input.GetTracedInput().Expression)
++	{
++		return Compiler->CustomOutput(this, OutputIndex, Input.Compile(Compiler));
++	}
++	else
++	{
++		return CompilerError(Compiler, TEXT("Retroreflection input is missing"));
++	}
++}
++	 
++	 
++void UMaterialExpressionRetroreflectionCustomOutput::GetCaption(TArray<FString>& OutCaptions) const
++{
++	OutCaptions.Add(FString(TEXT("Retroreflection")));
++}
++	 
++FExpressionInput* UMaterialExpressionRetroreflectionCustomOutput::GetInput(int32 InputIndex)
++{
++	return InputIndex == 0 ? &Input : nullptr;
++}
++#endif // WITH_EDITOR
++
+ ///////////////////////////////////////////////////////////////////////////////
+ // Vertex to pixel interpolated data handler
+ ///////////////////////////////////////////////////////////////////////////////
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressionsIR.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressionsIR.cpp
+index 367e826533b7..7f12d7014bf9 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressionsIR.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressionsIR.cpp
+@@ -27,6 +27,8 @@
+ #include "Materials/MaterialExpressionAtmosphericLightColor.h"
+ #include "Materials/MaterialExpressionAtmosphericLightVector.h"
+ #include "Materials/MaterialExpressionBentNormalCustomOutput.h"
++// RDTG
++#include "Materials/MaterialExpressionRetroreflectionCustomOutput.h"
+ #include "Materials/MaterialExpressionBlackBody.h"
+ #include "Materials/MaterialExpressionBlendMaterialAttributes.h"
+ #include "Materials/MaterialExpressionBreakMaterialAttributes.h"
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialIRInternal.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialIRInternal.cpp
+index fed46953383f..6df5081f0980 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialIRInternal.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialIRInternal.cpp
+@@ -35,6 +35,8 @@ bool IsMaterialPropertyEnabled(EMaterialProperty InProperty)
+ 		case MP_WorldPositionOffset:
+ 		case MP_CustomData0:
+ 		case MP_CustomData1:
++		// RDTG
++		case MP_CustomData2:
+ 			return true;
+ 		default:
+ 			return false;
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialIRToHLSLTranslator.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialIRToHLSLTranslator.cpp
+index debec873edce..ffce0d8a6acf 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialIRToHLSLTranslator.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialIRToHLSLTranslator.cpp
+@@ -188,6 +188,8 @@ static const TCHAR* GetShadingModelParameterName(EMaterialShadingModel InModel)
+ 		case MSM_Eye: return TEXT("MATERIAL_SHADINGMODEL_EYE");
+ 		case MSM_SingleLayerWater: return TEXT("MATERIAL_SHADINGMODEL_SINGLELAYERWATER");
+ 		case MSM_ThinTranslucent: return TEXT("MATERIAL_SHADINGMODEL_THIN_TRANSLUCENT");
++		// RDTG
++		case MSM_Retroreflective: return TEXT("MATERIAL_SHADINGMODEL_RETROREFLECTIVE");
+ 		default: UE_MIR_UNREACHABLE();
+ 	}
+ }
+@@ -1111,6 +1113,8 @@ struct FTranslator : FMaterialIRToHLSLTranslation
+ 		OutEnvironment.SetDefine(TEXT("NUM_VIRTUALTEXTURE_SAMPLES"), 0);
+ 		OutEnvironment.SetDefine(TEXT("MATERIAL_VIRTUALTEXTURE_FEEDBACK"), false);
+ 		OutEnvironment.SetDefine(TEXT("IS_MATERIAL_SHADER"), true);
++		// RDTG
++		OutEnvironment.SetDefine(TEXT("MATERIAL_USES_RETROREFLECTION"), false);
+ 
+ 		// Set all defines that are defined by the module.
+ 		// Any conditional exemption via material properties, such as 'Material->IsUsedWithInstancedStaticMeshes()', are handled during the material IR analysis.
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialInstance.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialInstance.cpp
+index b57d5f2ef3eb..f2e2242d3712 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialInstance.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialInstance.cpp
+@@ -1918,6 +1918,12 @@ bool UMaterialInstanceDynamic::IsThinSurface() const
+ 	return Parent ? Parent->IsThinSurface() : false;
+ }
+ 
++// RDTG
++bool UMaterialInstanceDynamic::HasRetroreflections() const
++{
++	return Parent ? Parent->HasRetroreflections() : false;
++}
++
+ bool UMaterialInstanceDynamic::IsTranslucencyWritingVelocity() const
+ {
+ 	return Parent ? Parent->IsTranslucencyWritingVelocity() : false;
+@@ -2478,7 +2484,18 @@ void UMaterialInstance::UpdateOverridableBaseProperties()
+ 		bIsThinSurface = Parent->IsThinSurface();
+ 		BasePropertyOverrides.bIsThinSurface = bIsThinSurface;
+ 	}
+-
++	
++	// RDTG
++	if (BasePropertyOverrides.bOverride_bHasRetroreflections)
++	{
++		bHasRetroreflections = BasePropertyOverrides.bHasRetroreflections != 0;
++	}
++	else
++	{
++		bHasRetroreflections = Parent->HasRetroreflections();
++		BasePropertyOverrides.bHasRetroreflections = bHasRetroreflections;
++	}
++	
+ 	if (BasePropertyOverrides.bOverride_DitheredLODTransition)
+ 	{
+ 		DitheredLODTransition = BasePropertyOverrides.DitheredLODTransition != 0;
+@@ -4848,6 +4865,8 @@ void UMaterialInstance::GetBasePropertyOverridesHash(FSHAHash& OutHash)const
+ 	GetPropertyOverrideHash(GetShadingModels(), Mat->GetShadingModels(), TEXT("bOverride_ShadingModel"));
+ 	GetPropertyOverrideHash(IsTwoSided(), Mat->IsTwoSided(), TEXT("bOverride_TwoSided"));
+ 	GetPropertyOverrideHash(IsThinSurface(), Mat->IsThinSurface(), TEXT("bOverride_bIsThinSurface"));
++	// RDTG
++	GetPropertyOverrideHash(HasRetroreflections(), Mat->HasRetroreflections(), TEXT("bOverride_bHasRetroreflections"));
+ 	GetPropertyOverrideHash(IsDitheredLODTransition(), Mat->IsDitheredLODTransition(), TEXT("bOverride_DitheredLODTransition"));
+ 	GetPropertyOverrideHash(GetCastDynamicShadowAsMasked(), Mat->GetCastDynamicShadowAsMasked(), TEXT("bOverride_CastDynamicShadowAsMasked"));
+ 	GetPropertyOverrideHash(IsTranslucencyWritingVelocity(), Mat->IsTranslucencyWritingVelocity(), TEXT("bOverride_OutputTranslucentVelocity"));
+@@ -4879,6 +4898,8 @@ bool UMaterialInstance::HasOverridenBaseProperties() const
+ 		GetShadingModels() != Parent->GetShadingModels() ||
+ 		IsTwoSided() != Parent->IsTwoSided() ||
+ 		IsThinSurface() != Parent->IsThinSurface() ||
++		// RDTG
++		HasRetroreflections() != Parent->HasRetroreflections() ||
+ 		IsDitheredLODTransition() != Parent->IsDitheredLODTransition() ||
+ 		GetCastDynamicShadowAsMasked() != Parent->GetCastDynamicShadowAsMasked() ||
+ 		IsTranslucencyWritingVelocity() != Parent->IsTranslucencyWritingVelocity() ||
+@@ -4902,6 +4923,8 @@ FString UMaterialInstance::GetBasePropertyOverrideString() const
+ 		BasePropString.Appendf(TEXT("bOverride_ShadingModel_%d, "), (GetShadingModels() != Parent->GetShadingModels()));
+ 		BasePropString.Appendf(TEXT("bOverride_TwoSided_%d, "), (IsTwoSided() != Parent->IsTwoSided()));
+ 		BasePropString.Appendf(TEXT("bOverride_bIsThinSurface_%d, "), (IsThinSurface() != Parent->IsThinSurface()));
++		// RDTG
++		BasePropString.Appendf(TEXT("bOverride_bHasRetroreflections_%d, "), (HasRetroreflections() != Parent->HasRetroreflections()));
+ 		BasePropString.Appendf(TEXT("bOverride_DitheredLODTransition_%d, "), (IsDitheredLODTransition() != Parent->IsDitheredLODTransition()));
+ 		BasePropString.Appendf(TEXT("bOverride_CastDynamicShadowAsMasked_%d, "), (GetCastDynamicShadowAsMasked() != Parent->GetCastDynamicShadowAsMasked()));
+ 		BasePropString.Appendf(TEXT("bOverride_OutputTranslucentVelocity_%d "), (IsTranslucencyWritingVelocity() != Parent->IsTranslucencyWritingVelocity()));
+@@ -4951,6 +4974,12 @@ bool UMaterialInstance::IsThinSurface() const
+ 	return bIsThinSurface;
+ }
+ 
++// RDTG
++bool UMaterialInstance::HasRetroreflections() const
++{
++	return bHasRetroreflections;
++}
++
+ bool UMaterialInstance::IsTranslucencyWritingVelocity() const
+ {
+ 	return bOutputTranslucentVelocity && IsTranslucentBlendMode(GetBlendMode());
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialInterface.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialInterface.cpp
+index 0d69b2ebf2cc..60ba00a68a6e 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialInterface.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialInterface.cpp
+@@ -459,7 +459,8 @@ FMaterialRelevance UMaterialInterface::GetRelevance_Internal(const UMaterial* Ma
+ 
+ 	// Note that even though XX_GameThread() api is called, this function can be called on non game thread via 
+ 	// GetRelevance_Concurrent()
+-	bool bUsesAnisotropy = MaterialResource->GetShadingModels().HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat }) && 
++	// RDTG
++	bool bUsesAnisotropy = MaterialResource->GetShadingModels().HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat, MSM_Retroreflective }) && 
+ 		MaterialResource->MaterialUsesAnisotropy_GameThread();
+ 
+ 	const EBlendMode BlendMode = (EBlendMode)GetBlendMode();
+@@ -507,6 +508,8 @@ FMaterialRelevance UMaterialInterface::GetRelevance_Internal(const UMaterial* Ma
+ 	MaterialRelevance.bDistortion = MaterialResource->IsDistorted();
+ 	MaterialRelevance.bHairStrands = IsCompatibleWithHairStrands(MaterialResource, InFeatureLevel);
+ 	MaterialRelevance.bTwoSided = MaterialResource->IsTwoSided();
++	// RDTG
++	MaterialRelevance.bHasRetroreflection = MaterialResource->HasRetroreflections();
+ 	MaterialRelevance.bSeparateTranslucency = bIsTranslucent && (TranslucencyPass == MTP_AfterDOF);
+ 	MaterialRelevance.bTranslucencyModulate = bMaterialSeparateModulation;
+ 	MaterialRelevance.bPostMotionBlurTranslucency = (TranslucencyPass == MTP_AfterMotionBlur);
+@@ -1350,6 +1353,12 @@ bool UMaterialInterface::IsThinSurface() const
+ 	return false;
+ }
+ 
++// RDTG
++bool UMaterialInterface::HasRetroreflections() const
++{
++	return false;
++}
++
+ bool UMaterialInterface::IsDitheredLODTransition() const
+ {
+ 	return false;
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialShader.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialShader.cpp
+index 703434cb6ba6..3703047a3678 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialShader.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialShader.cpp
+@@ -135,6 +135,7 @@ FString GetShadingModelString(EMaterialShadingModel ShadingModel)
+ 		case MSM_Eye:				ShadingModelName = TEXT("MSM_Eye"); break;
+ 		case MSM_SingleLayerWater:	ShadingModelName = TEXT("MSM_SingleLayerWater"); break;
+ 		case MSM_ThinTranslucent:	ShadingModelName = TEXT("MSM_ThinTranslucent"); break;
++		case MSM_Retroreflective:	ShadingModelName = TEXT("MSM_Retroreflective"); break;
+ 		default: ShadingModelName = TEXT("Unknown"); break;
+ 	}
+ 	return ShadingModelName;
+@@ -562,7 +563,8 @@ void UpdateMaterialShaderCompilingStats(const FMaterial* Material)
+ 	{
+ 		INC_DWORD_STAT_BY(STAT_ShaderCompiling_NumUnlitMaterialShaders, 1);
+ 	}
+-	else if (ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_Subsurface, MSM_PreintegratedSkin, MSM_ClearCoat, MSM_Cloth, MSM_SubsurfaceProfile, MSM_TwoSidedFoliage, MSM_SingleLayerWater, MSM_ThinTranslucent }))
++	// RDTG
++	else if (ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_Subsurface, MSM_PreintegratedSkin, MSM_ClearCoat, MSM_Cloth, MSM_SubsurfaceProfile, MSM_TwoSidedFoliage, MSM_SingleLayerWater, MSM_ThinTranslucent, MSM_Retroreflective }))
+ 	{
+ 		INC_DWORD_STAT_BY(STAT_ShaderCompiling_NumLitMaterialShaders, 1);
+ 	}
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialShared.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialShared.cpp
+index c9e3fad7d852..14ef3ae72b54 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialShared.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialShared.cpp
+@@ -1932,6 +1932,13 @@ bool FMaterialResource::IsThinSurface() const
+ 	return MaterialInstance ? MaterialInstance->IsThinSurface() : Material->IsThinSurface();
+ }
+ 
++// RDTG
++bool FMaterialResource::HasRetroreflections() const
++{
++	return MaterialInstance ? MaterialInstance->HasRetroreflections() : Material->HasRetroreflections();
++}
++
++
+ bool FMaterialResource::IsDitheredLODTransition() const 
+ {
+ 	if (!AllowDitheredLODTransition(GetFeatureLevel()))
+@@ -2628,6 +2635,8 @@ void FMaterial::SetupMaterialEnvironment(
+ 	SET_SHADER_DEFINE(OutEnvironment, USE_DITHERED_LOD_TRANSITION_FROM_MATERIAL, IsDitheredLODTransition());
+ 	SET_SHADER_DEFINE(OutEnvironment, MATERIAL_TWOSIDED, IsTwoSided());
+ 	SET_SHADER_DEFINE(OutEnvironment, MATERIAL_ISTHINSURFACE, IsThinSurface());
++	// RDTG
++	SET_SHADER_DEFINE(OutEnvironment, MATERIAL_HAS_RETROREFLECTIONS, HasRetroreflections());
+ 	SET_SHADER_DEFINE(OutEnvironment, MATERIAL_TANGENTSPACENORMAL, IsTangentSpaceNormal());
+ 	SET_SHADER_DEFINE(OutEnvironment, GENERATE_SPHERICAL_PARTICLE_NORMALS,ShouldGenerateSphericalParticleNormals());
+ 	SET_SHADER_DEFINE(OutEnvironment, MATERIAL_USES_SCENE_COLOR_COPY, RequiresSceneColorCopy_GameThread());
+@@ -5599,6 +5608,8 @@ FMaterialShaderParametersBase::FMaterialShaderParametersBase(const FMaterial* In
+ 	bIsDitherMasked = InMaterial->IsDitherMasked();
+ 	bIsTwoSided = InMaterial->IsTwoSided();
+ 	bIsThinSurface = InMaterial->IsThinSurface();
++	// RDTG
++	bHasRetroreflections = InMaterial->HasRetroreflections();
+ 	bIsDistorted = InMaterial->IsDistorted();
+ 	bShouldCastDynamicShadows = InMaterial->ShouldCastDynamicShadows();
+ 	bWritesEveryPixel = InMaterial->WritesEveryPixel(false);
+diff --git a/Engine/Source/Runtime/Engine/Private/RayTracingVisualizationData.cpp b/Engine/Source/Runtime/Engine/Private/RayTracingVisualizationData.cpp
+index d104f47268df..b2deffc239f2 100644
+--- a/Engine/Source/Runtime/Engine/Private/RayTracingVisualizationData.cpp
++++ b/Engine/Source/Runtime/Engine/Private/RayTracingVisualizationData.cpp
+@@ -32,23 +32,24 @@ FRayTracingVisualizationData::FRayTracingVisualizationData()
+ 		AddVisualizationMode(TEXT("Radiance"), LOCTEXT("Radiance", "Radiance"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_RADIANCE, true);
+ 		AddVisualizationMode(TEXT("WorldNormal"), LOCTEXT("WorldNormal", "World Normal"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_WORLD_NORMAL, false);
+ 		AddVisualizationMode(TEXT("BaseColor"), LOCTEXT("BaseColor", "Base Color"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_BASE_COLOR, false);
+-		AddVisualizationMode(TEXT("DiffuseColor"), LOCTEXT("DiffuseColor", "Diffuse Color"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_DIFFUSE_COLOR, false);
+-		AddVisualizationMode(TEXT("SpecularColor"), LOCTEXT("SpecularColor", "Specular Color"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_SPECULAR_COLOR, false);
+-		AddVisualizationMode(TEXT("Opacity"), LOCTEXT("Opacity", "Opacity"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_OPACITY, false);
+-		AddVisualizationMode(TEXT("Metallic"), LOCTEXT("Metallic", "Metallic"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_METALLIC, false);
+-		AddVisualizationMode(TEXT("Specular"), LOCTEXT("Specular", "Specular"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_SPECULAR, false);
+-		AddVisualizationMode(TEXT("Roughness"), LOCTEXT("Roughness", "Roughness"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_ROUGHNESS, false);
+-		AddVisualizationMode(TEXT("Ior"), LOCTEXT("Ior", "Ior"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_IOR, false);
+-		AddVisualizationMode(TEXT("ShadingModelID"), LOCTEXT("ShadingModelID", "Shading Model ID"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_SHADING_MODEL, false);
+-		AddVisualizationMode(TEXT("BlendingMode"), LOCTEXT("BlendingMode", "Blending Mode"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_BLENDING_MODE, false);
+-		AddVisualizationMode(TEXT("PrimitiveLightingChannelMask"), LOCTEXT("PrimitiveLightingChannelMask", "Primitive Lighting Channel Mask"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_LIGHTING_CHANNEL_MASK, false);
+-		AddVisualizationMode(TEXT("CustomData"), LOCTEXT("CustomData", "Custom Data"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_CUSTOM_DATA, false);
+-		AddVisualizationMode(TEXT("GBufferAO"), LOCTEXT("GBufferAO", "GBuffer AO"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_GBUFFER_AO, false);
+-		AddVisualizationMode(TEXT("IndirectIrradiance"), LOCTEXT("IndirectIrradiance", "Indirect Irradiance"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_INDIRECT_IRRADIANCE, true);
+-		AddVisualizationMode(TEXT("WorldPosition"), LOCTEXT("WorldPosition", "World Position"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_WORLD_POSITION, false);
+-		AddVisualizationMode(TEXT("HitKind"), LOCTEXT("HitKind", "Hit Kind"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_HITKIND, false);
+-		AddVisualizationMode(TEXT("WorldTangent"), LOCTEXT("WorldTangent", "World Tangent"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_WORLD_TANGENT, false);
+-		AddVisualizationMode(TEXT("Anisotropy"), LOCTEXT("Anisotropy", "Anisotropy"), FModeType::Other, RAY_TRACING_DEBUG_VIZ_ANISOTROPY, false);
++		// RDTG - Re-enabling these. Do not include this in future updates as Epic seems to be changing everything here for future versions. TO change them back swap FModeType::Standard to FModeType::Other on everything between this line and the debugging the geometry itself line.
++		AddVisualizationMode(TEXT("DiffuseColor"), LOCTEXT("DiffuseColor", "Diffuse Color"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_DIFFUSE_COLOR, false);
++		AddVisualizationMode(TEXT("SpecularColor"), LOCTEXT("SpecularColor", "Specular Color"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_SPECULAR_COLOR, false);
++		AddVisualizationMode(TEXT("Opacity"), LOCTEXT("Opacity", "Opacity"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_OPACITY, false);
++		AddVisualizationMode(TEXT("Metallic"), LOCTEXT("Metallic", "Metallic"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_METALLIC, false);
++		AddVisualizationMode(TEXT("Specular"), LOCTEXT("Specular", "Specular"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_SPECULAR, false);
++		AddVisualizationMode(TEXT("Roughness"), LOCTEXT("Roughness", "Roughness"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_ROUGHNESS, false);
++		AddVisualizationMode(TEXT("Ior"), LOCTEXT("Ior", "Ior"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_IOR, false);
++		AddVisualizationMode(TEXT("ShadingModelID"), LOCTEXT("ShadingModelID", "Shading Model ID"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_SHADING_MODEL, false);
++		AddVisualizationMode(TEXT("BlendingMode"), LOCTEXT("BlendingMode", "Blending Mode"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_BLENDING_MODE, false);
++		AddVisualizationMode(TEXT("PrimitiveLightingChannelMask"), LOCTEXT("PrimitiveLightingChannelMask", "Primitive Lighting Channel Mask"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_LIGHTING_CHANNEL_MASK, false);
++		AddVisualizationMode(TEXT("CustomData"), LOCTEXT("CustomData", "Custom Data"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_CUSTOM_DATA, false);
++		AddVisualizationMode(TEXT("GBufferAO"), LOCTEXT("GBufferAO", "GBuffer AO"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_GBUFFER_AO, false);
++		AddVisualizationMode(TEXT("IndirectIrradiance"), LOCTEXT("IndirectIrradiance", "Indirect Irradiance"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_INDIRECT_IRRADIANCE, true);
++		AddVisualizationMode(TEXT("WorldPosition"), LOCTEXT("WorldPosition", "World Position"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_WORLD_POSITION, false);
++		AddVisualizationMode(TEXT("HitKind"), LOCTEXT("HitKind", "Hit Kind"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_HITKIND, false);
++		AddVisualizationMode(TEXT("WorldTangent"), LOCTEXT("WorldTangent", "World Tangent"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_WORLD_TANGENT, false);
++		AddVisualizationMode(TEXT("Anisotropy"), LOCTEXT("Anisotropy", "Anisotropy"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_ANISOTROPY, false);
+ 
+ 		// debugging the geometry itself
+ 		AddVisualizationMode(TEXT("Instances"), LOCTEXT("Instances", "Instances"), FModeType::Standard, RAY_TRACING_DEBUG_VIZ_INSTANCES, false);
+diff --git a/Engine/Source/Runtime/Engine/Private/ShaderCompiler/ShaderGenerationUtil.cpp b/Engine/Source/Runtime/Engine/Private/ShaderCompiler/ShaderGenerationUtil.cpp
+index 897fadcf36d1..62ef3a6ca080 100644
+--- a/Engine/Source/Runtime/Engine/Private/ShaderCompiler/ShaderGenerationUtil.cpp
++++ b/Engine/Source/Runtime/Engine/Private/ShaderCompiler/ShaderGenerationUtil.cpp
+@@ -131,6 +131,9 @@ void ApplyFetchEnvironmentInternal(FShaderMaterialPropertyDefines& SrcDefines, c
+ 	FETCH_COMPILE_BOOL(MATERIAL_SHADINGMODEL_SINGLELAYERWATER);
+ 	FETCH_COMPILE_BOOL(MATERIAL_SHADINGMODEL_THIN_TRANSLUCENT);
+ 
++	// RDTG
++	FETCH_COMPILE_BOOL(MATERIAL_SHADINGMODEL_RETROREFLECTIVE);
++	
+ 	FETCH_COMPILE_BOOL(SINGLE_LAYER_WATER_SEPARATED_MAIN_LIGHT);
+ 
+ 	FETCH_COMPILE_BOOL(MATERIAL_FULLY_ROUGH);
+@@ -161,6 +164,8 @@ void ApplyFetchEnvironmentInternal(FShaderMaterialPropertyDefines& SrcDefines, c
+ 	FETCH_COMPILE_BOOL(USE_DITHERED_LOD_TRANSITION_FROM_MATERIAL);
+ 	FETCH_COMPILE_BOOL(MATERIAL_TWOSIDED);
+ 	FETCH_COMPILE_BOOL(MATERIAL_ISTHINSURFACE);
++	// RDTG
++	FETCH_COMPILE_BOOL(MATERIAL_HAS_RETROREFLECTIONS);
+ 	FETCH_COMPILE_BOOL(MATERIAL_TANGENTSPACENORMAL);
+ 	FETCH_COMPILE_BOOL(GENERATE_SPHERICAL_PARTICLE_NORMALS);
+ 	FETCH_COMPILE_BOOL(MATERIAL_USE_PREINTEGRATED_GF);
+@@ -502,6 +507,10 @@ static FString GetSlotTextName(EGBufferSlot Slot)
+ 		return TEXT("ClearCoat");
+ 	case GBS_ClearCoatRoughness:
+ 		return TEXT("ClearCoatRoughness");
++		// RDTG
++		// CustomData2
++	case GBS_RetroreflectionIntensity:
++		return TEXT("RetroreflectionIntensity");
+ 	case GBS_HairSecondaryWorldNormal:
+ 		return TEXT("HaireEcondaryWorldNormal");
+ 	case GBS_HairBacklit:
+@@ -1738,6 +1747,22 @@ static void SetSlotsForShadingModelType(bool Slots[], EMaterialShadingModel Shad
+ 	case MSM_ThinTranslucent:
+ 		// thin translucent doesn't write to the GBuffer
+ 		break;
++	// RDTG
++	case MSM_Retroreflective:
++    	SetSharedGBufferSlots(Slots);
++    	if (bMergeCustom)
++    	{
++    		Slots[GBS_CustomData] = true;
++    		Slots[GBS_SubsurfaceColor] = true;
++    		Slots[GBS_Opacity] = true;
++    		Slots[GBS_RetroreflectionIntensity] = true;
++    	}
++    	else
++    	{
++    		Slots[GBS_SubsurfaceColor] = true;
++    		Slots[GBS_Opacity] = true;
++    	}
++    	break;
+ 	}
+ }
+ 
+@@ -1832,7 +1857,13 @@ static void DetermineUsedMaterialSlots(
+ 		SetStandardGBufferSlots(Slots, bWriteEmissive, bHasTangent, bHasVelocity, bWritesVelocity, bHasStaticLighting, bIsSubstrateMaterial, bIsSubstrateNewGBuffer);
+ 		Slots[GBS_CustomData] = GetGBufferSlotUsage(bUseCustomData);
+ 	}
+-
++	// RDTG
++	if (Mat.MATERIAL_SHADINGMODEL_RETROREFLECTIVE)
++		{
++			SetStandardGBufferSlots(Slots, bWriteEmissive, bHasTangent, bHasVelocity, bWritesVelocity, bHasStaticLighting, bIsSubstrateMaterial, bIsSubstrateNewGBuffer);
++			Slots[GBS_CustomData] = GetGBufferSlotUsage(bUseCustomData);
++		}
++	
+ 	if (Mat.MATERIAL_SHADINGMODEL_PREINTEGRATED_SKIN)
+ 	{
+ 		SetStandardGBufferSlots(Slots, bWriteEmissive, bHasTangent, bHasVelocity, bWritesVelocity, bHasStaticLighting, bIsSubstrateMaterial, bIsSubstrateNewGBuffer);
+diff --git a/Engine/Source/Runtime/Engine/Public/MaterialCompiler.h b/Engine/Source/Runtime/Engine/Public/MaterialCompiler.h
+index 77d28318432c..180015ab501c 100644
+--- a/Engine/Source/Runtime/Engine/Public/MaterialCompiler.h
++++ b/Engine/Source/Runtime/Engine/Public/MaterialCompiler.h
+@@ -85,7 +85,9 @@ enum ESubstrateMaterialExport : uint8
+ 	SME_SubsurfaceColor			= 14,
+ 	SME_Tangent					= 15,
+ 	SME_ShadingModel			= 16,
+-	SME_MaterialPreview			= 17
++	SME_MaterialPreview			= 17,
++	// RDTG
++	SME_CustomData2				= 18
+ };
+ 
+ /** Exported materials are all opaque unlit. This is used to give some context to the export logic.*/
+@@ -695,12 +697,13 @@ public:
+ 		bool bIsAtTheBottomOfTopology,
+ 		int32 Normal, int32 Tangent, const FString& SharedLocalBasisIndexMacro,
+ 		FSubstrateOperator* PromoteToOperator) = 0;
++	// RDTG
+ 	virtual int32 SubstrateConversionFromLegacy(
+ 		bool bHasDynamicShadingModels,
+ 		int32 BaseColor, int32 Specular, int32 Metallic,
+ 		int32 Roughness, int32 Anisotropy,
+ 		int32 SubSurfaceColor, int32 SubSurfaceProfileId,
+-		int32 ClearCoat, int32 ClearCoatRoughness,
++		int32 ClearCoat, int32 ClearCoatRoughness, int32 RetroreflectionIntensity,
+ 		int32 EmissiveColor,
+ 		int32 Opacity,
+ 		int32 ThinTranslucentTransmittanceColor,
+@@ -1420,12 +1423,13 @@ public:
+ 			PromoteToOperator);
+ 	}
+ 
++	// RDTG
+ 	virtual int32 SubstrateConversionFromLegacy(
+ 		bool bHasDynamicShadingModels,
+ 		int32 BaseColor, int32 Specular, int32 Metallic,
+ 		int32 Roughness, int32 Anisotropy,
+ 		int32 SubSurfaceColor, int32 SubSurfaceProfileId,
+-		int32 ClearCoat, int32 ClearCoatRoughness,
++		int32 ClearCoat, int32 ClearCoatRoughness, int32 RetroreflectionIntensity,
+ 		int32 EmissiveColor,
+ 		int32 Opacity,
+ 		int32 ThinTranslucentTransmittanceColor,
+@@ -1437,12 +1441,13 @@ public:
+ 		int32 CustomTangent_Tangent,
+ 		FSubstrateOperator* PromoteToOperator) override
+ 	{
++		// RDTG
+ 		return Compiler->SubstrateConversionFromLegacy(
+ 			bHasDynamicShadingModels,
+ 			BaseColor, Specular, Metallic,
+ 			Roughness, Anisotropy,
+ 			SubSurfaceColor, SubSurfaceProfileId,
+-			ClearCoat, ClearCoatRoughness,
++			ClearCoat, ClearCoatRoughness, RetroreflectionIntensity,
+ 			EmissiveColor,
+ 			Opacity,
+ 			ThinTranslucentTransmittanceColor,
+diff --git a/Engine/Source/Runtime/Engine/Public/MaterialExpressionIO.h b/Engine/Source/Runtime/Engine/Public/MaterialExpressionIO.h
+index 4f8ec686c85e..a5a1720e2243 100644
+--- a/Engine/Source/Runtime/Engine/Public/MaterialExpressionIO.h
++++ b/Engine/Source/Runtime/Engine/Public/MaterialExpressionIO.h
+@@ -305,6 +305,8 @@ struct FMaterialAttributesInput : FExpressionInput
+ 	: PropertyConnectedMask(0)
+ 	{ 
+ 		// Ensure PropertyConnectedMask can contain all properties.
++		// RDTG
++		// This may need changing from 8 to 9 for the retroreflection custom data to work.
+ 		static_assert((uint64)(MP_MaterialAttributes)-1 < (8 * sizeof(PropertyConnectedMask)), "PropertyConnectedMask cannot contain entire EMaterialProperty enumeration.");
+ 	}
+ 
+diff --git a/Engine/Source/Runtime/Engine/Public/MaterialShared.h b/Engine/Source/Runtime/Engine/Public/MaterialShared.h
+index a3b0c96ae322..3ef27410d64c 100644
+--- a/Engine/Source/Runtime/Engine/Public/MaterialShared.h
++++ b/Engine/Source/Runtime/Engine/Public/MaterialShared.h
+@@ -124,7 +124,7 @@ inline bool IsSubsurfaceShadingModel(FMaterialShadingModelField ShadingModel)
+ {
+ 	return ShadingModel.HasShadingModel(MSM_Subsurface) || ShadingModel.HasShadingModel(MSM_PreintegratedSkin) ||
+ 		ShadingModel.HasShadingModel(MSM_SubsurfaceProfile) || ShadingModel.HasShadingModel(MSM_TwoSidedFoliage) ||
+-		ShadingModel.HasShadingModel(MSM_Cloth) || ShadingModel.HasShadingModel(MSM_Eye);
++		ShadingModel.HasShadingModel(MSM_Cloth) || ShadingModel.HasShadingModel(MSM_Eye) || ShadingModel.HasShadingModel(MSM_Retroreflective);
+ }
+ 
+ inline bool UseSubsurfaceProfile(FMaterialShadingModelField ShadingModel)
+@@ -990,6 +990,9 @@ namespace EMaterialShaderMapUsage
+ 		MaterialExportCustomOutput,
+ 		MaterialExportShadingModel,
+ 		MaterialExportRefraction,
++		// RDTG
++		// CustomData2
++		MaterialExportRetroreflectionIntensity,
+ 	};
+ }
+ 
+@@ -1083,6 +1086,9 @@ struct FMaterialShaderParametersBase
+ 			uint64 bDisablePreExposureScale : 1;
+ 			uint64 bAllowVariableRateShading : 1;
+ 			uint64 bSupportsMaterialCache : 1;
++
++			// RDTG
++			uint64 bHasRetroreflections : 1;
+ 		};
+ 	};
+ 
+@@ -2169,6 +2175,8 @@ public:
+ 	virtual EMaterialDomain GetMaterialDomain() const = 0; // See EMaterialDomain.
+ 	virtual bool IsTwoSided() const = 0;
+ 	virtual bool IsThinSurface() const = 0;
++	// RDTG
++	virtual bool HasRetroreflections() const = 0;
+ 	virtual bool IsDitheredLODTransition() const = 0;
+ 	virtual bool IsTranslucencyWritingCustomDepth() const { return false; }
+ 	virtual bool IsTranslucencyWritingVelocity() const { return false; }
+@@ -2930,6 +2938,8 @@ public:
+ 	ENGINE_API virtual EMaterialDomain GetMaterialDomain() const override;
+ 	ENGINE_API virtual bool IsTwoSided() const override;
+ 	ENGINE_API virtual bool IsThinSurface() const override;
++	// RDTG
++	ENGINE_API virtual bool HasRetroreflections() const override;
+ 	ENGINE_API virtual bool IsDitheredLODTransition() const override;
+ 	ENGINE_API virtual bool IsTranslucencyWritingCustomDepth() const override;
+ 	ENGINE_API virtual bool IsTranslucencyWritingVelocity() const override;
+diff --git a/Engine/Source/Runtime/Engine/Public/Materials/Material.h b/Engine/Source/Runtime/Engine/Public/Materials/Material.h
+index f9342c99f832..8bb37badfcc2 100644
+--- a/Engine/Source/Runtime/Engine/Public/Materials/Material.h
++++ b/Engine/Source/Runtime/Engine/Public/Materials/Material.h
+@@ -366,6 +366,17 @@ public:
+ 	UPROPERTY()
+ 	FScalarMaterialInput AmbientOcclusion;
+ 
++	// RDTG
++	/** RetroReflection scalar input for return intensity (Pin: Custom Data 2) */
++	UPROPERTY()
++	FScalarMaterialInput RetroreflectionIntensity;
++
++	//UPROPERTY()
++	//FScalarMaterialInput RetroreflectionMask;
++
++	//UPROPERTY()
++	//FScalarMaterialInput RetroreflectionDepth;
++
+ 	/**
+ 	 * output refraction index for translucent rendering
+ 	 * Air:1.0 Water:1.333 Ice:1.3 Glass:~1.6 Diamond:2.42
+@@ -547,6 +558,11 @@ public:
+ 	UPROPERTY(EditAnywhere, Category = Material)
+ 	uint8 bIsThinSurface : 1;
+ 
++	// RDTG
++	/** Indicates that the material should be rendered with retro-reflections enabled. */
++	UPROPERTY(EditAnywhere, Category = Material)
++	uint8 bHasRetroreflections : 1;
++
+ 	/** Whether meshes rendered with the material should support dithered LOD transitions. */
+ 	UPROPERTY(EditAnywhere, Category = Material, AdvancedDisplay, meta = (DisplayName = "Dithered LOD Transition"))
+ 	uint8 DitheredLODTransition : 1;
+@@ -1259,6 +1275,9 @@ public:
+ 	ENGINE_API virtual bool IsShadingModelFromMaterialExpression() const override;
+ 	ENGINE_API virtual bool IsTwoSided() const override;
+ 	ENGINE_API virtual bool IsThinSurface() const override;
++	// RDTG
++	ENGINE_API virtual bool HasRetroreflections() const override;
++	
+ 	ENGINE_API virtual bool IsDitheredLODTransition() const override;
+ 	ENGINE_API virtual bool IsTranslucencyWritingCustomDepth() const override;
+ 	ENGINE_API virtual bool IsTranslucencyWritingVelocity() const override;
+@@ -2130,6 +2149,11 @@ private:
+ 	UPROPERTY()
+ 	FScalarMaterialInput ClearCoatRoughness_DEPRECATED;
+ 
++	// RDTG
++	// Leaving this here for now.
++	UPROPERTY()
++	FScalarMaterialInput RetroreflectionIntensity_DEPRECATED;
++
+ 	UPROPERTY()
+ 	FScalarMaterialInput AmbientOcclusion_DEPRECATED;
+ 
+diff --git a/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionMakeMaterialAttributes.h b/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionMakeMaterialAttributes.h
+index d2d0f6edfc6e..5f425f78aabb 100644
+--- a/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionMakeMaterialAttributes.h
++++ b/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionMakeMaterialAttributes.h
+@@ -73,6 +73,16 @@ public:
+ 	UPROPERTY()
+ 	FExpressionInput ShadingModel;
+ 
++	// RDTG
++	UPROPERTY()
++	FExpressionInput RetroreflectionIntensity;
++
++	//UPROPERTY()
++	//FExpressionInput RetroreflectionMask;
++
++	//UPROPERTY()
++	//FExpressionInput RetroreflectionDepth;
++
+ 	UPROPERTY()
+ 	FExpressionInput Displacement;
+ 
+diff --git a/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionRetroreflectionCustomOutput.h b/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionRetroreflectionCustomOutput.h
+index 43891c8730f7..8d467b490ee6 100644
+--- a/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionRetroreflectionCustomOutput.h
++++ b/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionRetroreflectionCustomOutput.h
+@@ -8,10 +8,10 @@
+ #include "MaterialExpressionIO.h"
+ #include "MaterialValueType.h"
+ #include "Materials/MaterialExpressionCustomOutput.h"
+-#include "MaterialExpressionBentNormalCustomOutput.generated.h"
++#include "MaterialExpressionRetroreflectionCustomOutput.generated.h"
+ 
+ UCLASS()
+-class UMaterialExpressionBentNormalCustomOutput : public UMaterialExpressionCustomOutput
++class UMaterialExpressionRetroreflectionCustomOutput : public UMaterialExpressionCustomOutput
+ {
+ 	GENERATED_UCLASS_BODY()
+ 
+@@ -21,12 +21,12 @@ class UMaterialExpressionBentNormalCustomOutput : public UMaterialExpressionCust
+ #if WITH_EDITOR
+ 	virtual int32 Compile(class FMaterialCompiler* Compiler, int32 OutputIndex) override;
+ 	virtual void GetCaption(TArray<FString>& OutCaptions) const override;
+-	virtual EMaterialValueType GetInputValueType(int32 InputIndex) override { return MCT_Float3; }
++	virtual EMaterialValueType GetInputValueType(int32 InputIndex) override { return MCT_Float4; }
+ 	virtual FExpressionInput* GetInput(int32 InputIndex) override;
+ #endif
+ 	virtual int32 GetNumOutputs() const override { return 1; }
+-	virtual FString GetFunctionName() const override { return TEXT("GetBentNormal"); }
+-	virtual FString GetDisplayName() const override { return TEXT("BentNormal"); }
++	virtual FString GetFunctionName() const override { return TEXT("GetRetroreflection"); }
++	virtual FString GetDisplayName() const override { return TEXT("Retroreflection"); }
+ };
+ 
+ 
+diff --git a/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionShadingModel.h b/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionShadingModel.h
+index c89f934676c2..fcbeb28be17e 100644
+--- a/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionShadingModel.h
++++ b/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionShadingModel.h
+@@ -33,7 +33,8 @@ class UMaterialExpressionShadingModel : public UMaterialExpression
+ 	virtual void GetCaption(TArray<FString>& OutCaptions) const override;
+ #endif
+ public:
+-	UPROPERTY(EditAnywhere, Category=ShadingModel,  meta=(ValidEnumValues="MSM_DefaultLit, MSM_Subsurface, MSM_PreintegratedSkin, MSM_ClearCoat, MSM_SubsurfaceProfile, MSM_TwoSidedFoliage, MSM_Hair, MSM_Cloth, MSM_Eye", ShowAsInputPin = "Primary"))
++	// RDTG
++	UPROPERTY(EditAnywhere, Category=ShadingModel,  meta=(ValidEnumValues="MSM_DefaultLit, MSM_Subsurface, MSM_PreintegratedSkin, MSM_ClearCoat, MSM_SubsurfaceProfile, MSM_TwoSidedFoliage, MSM_Hair, MSM_Cloth, MSM_Eye, MSM_Retroreflective", ShowAsInputPin = "Primary"))
+ 	TEnumAsByte<enum EMaterialShadingModel> ShadingModel = MSM_DefaultLit;
+ 	//~ End UMaterialExpression Interface
+ };
+\ No newline at end of file
+diff --git a/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionSubstrate.h b/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionSubstrate.h
+index dd58b2b69427..2a8ca936486b 100644
+--- a/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionSubstrate.h
++++ b/Engine/Source/Runtime/Engine/Public/Materials/MaterialExpressionSubstrate.h
+@@ -141,6 +141,13 @@ class UMaterialExpressionSubstrateShadingModels : public UMaterialExpressionSubs
+ 	UPROPERTY()
+ 	FExpressionInput ClearCoatRoughness;
+ 
++	// RDTG
++	/**
++	 * Color intensity for retroreflections
++	 */
++	UPROPERTY()
++	FExpressionInput RetroreflectionIntensity;
++
+ 	/**
+ 	 * Opacity of the material
+ 	 */
+@@ -225,6 +232,8 @@ class UMaterialExpressionSubstrateShadingModels : public UMaterialExpressionSubs
+ 
+ 	bool HasSSS() const;
+ 	bool HasAnisotropy() const;
++	// RDTG
++	bool HasRetroreflections() const;
+ 
+ 	static FSubstrateOperator* SubstrateGenerateMaterialTopologyTreeCommon(
+ 		class FMaterialCompiler* Compiler, struct FGuid ThisExpressionGuid, class UMaterialExpression* Parent, int32 OutputIndex,
+@@ -234,13 +243,15 @@ class UMaterialExpressionSubstrateShadingModels : public UMaterialExpressionSubs
+ 		const FExpressionInput& CustomTangent,
+ 		const FExpressionInput& ShadingModel);
+ 
++	// RDTG
+ 	static int32 CompileCommon(class FMaterialCompiler* Compiler,
+ 		FExpressionInput& BaseColor, FExpressionInput& Specular, FExpressionInput& Metallic, FExpressionInput& Roughness, FExpressionInput& EmissiveColor,
+-		FExpressionInput& Opacity, FExpressionInput& SubSurfaceColor, FExpressionInput& ClearCoat, FExpressionInput& ClearCoatRoughness,
++		FExpressionInput& Opacity, FExpressionInput& SubSurfaceColor, FExpressionInput& ClearCoat, FExpressionInput& ClearCoatRoughness, FExpressionInput& RetroreflectionIntensity, 
+ 		FExpressionInput& ShadingModel, TEnumAsByte<enum EMaterialShadingModel> ShadingModelOverride,
+ 		FExpressionInput& TransmittanceColor, FExpressionInput& ThinTranslucentSurfaceCoverage,
+ 		FExpressionInput& WaterScatteringCoefficients, FExpressionInput& WaterAbsorptionCoefficients, FExpressionInput& WaterPhaseG, FExpressionInput& ColorScaleBehindWater,
+ 		const bool bHasAnisotropy, FExpressionInput& Anisotropy,
++		const bool bHasRetroreflections,
+ 		FExpressionInput& Normal, FExpressionInput& Tangent,
+ 		FExpressionInput& ClearCoatNormal, FExpressionInput& CustomTangent,
+ 		const bool bHasSSS, USubsurfaceProfile* SSSProfile,
+diff --git a/Engine/Source/Runtime/Engine/Public/Materials/MaterialInstance.h b/Engine/Source/Runtime/Engine/Public/Materials/MaterialInstance.h
+index 3097aa01273d..d54b26cf9a35 100644
+--- a/Engine/Source/Runtime/Engine/Public/Materials/MaterialInstance.h
++++ b/Engine/Source/Runtime/Engine/Public/Materials/MaterialInstance.h
+@@ -654,6 +654,8 @@ class UMaterialInstance : public UMaterialInterface
+ 	uint8 bEnableTessellation : 1;
+ 	uint8 bEnableDisplacementFade : 1;
+ 	uint8 bCompatibleWithLumenCardSharing : 1;
++	// RDTG
++	uint8 bHasRetroreflections : 1;
+ protected:
+ 	uint8 bLoadedCachedData : 1;
+ public:
+@@ -895,6 +897,9 @@ public:
+ 	ENGINE_API virtual bool IsShadingModelFromMaterialExpression() const override;
+ 	ENGINE_API virtual bool IsTwoSided() const override;
+ 	ENGINE_API virtual bool IsThinSurface() const override;
++	// RDTG
++	ENGINE_API virtual bool HasRetroreflections() const override;
++	
+ 	ENGINE_API virtual bool IsTranslucencyWritingVelocity() const override;
+ 	ENGINE_API virtual bool IsTranslucencyVelocityFromDepth() const override;
+ 	ENGINE_API virtual bool IsDitheredLODTransition() const override;
+diff --git a/Engine/Source/Runtime/Engine/Public/Materials/MaterialInstanceBasePropertyOverrides.h b/Engine/Source/Runtime/Engine/Public/Materials/MaterialInstanceBasePropertyOverrides.h
+index 698ae26a4774..c5a5d9a35c83 100644
+--- a/Engine/Source/Runtime/Engine/Public/Materials/MaterialInstanceBasePropertyOverrides.h
++++ b/Engine/Source/Runtime/Engine/Public/Materials/MaterialInstanceBasePropertyOverrides.h
+@@ -37,6 +37,11 @@ struct FMaterialInstanceBasePropertyOverrides
+ 	UPROPERTY(EditAnywhere, Category = Material)
+ 	uint8 bOverride_TwoSided : 1;
+ 
++	// RDTG
++	/** Enables override of the HasRetroreflections property. */
++	UPROPERTY(EditAnywhere, Category = Material)
++	uint8 bOverride_bHasRetroreflections : 1;
++	
+ 	/** Enables override of the IsThinSurface property. */
+ 	UPROPERTY(EditAnywhere, Category = Material)
+ 	uint8 bOverride_bIsThinSurface : 1;
+@@ -81,6 +86,11 @@ struct FMaterialInstanceBasePropertyOverrides
+ 	UPROPERTY(EditAnywhere, Category = Material, meta = (editcondition = "bOverride_bIsThinSurface"))
+ 	uint8 bIsThinSurface : 1;
+ 
++	// RDTG
++	/** Indicates that the material should be rendered with retro-reflections */
++	UPROPERTY(EditAnywhere, Category = Material, meta = (editcondition = "bOverride_bHasRetroreflections"))
++	uint8 bHasRetroreflections : 1;
++
+ 	/** Whether the material should support a dithered LOD transition when used with the foliage system. */
+ 	UPROPERTY(EditAnywhere, Category = Material, meta = (editcondition = "bOverride_DitheredLODTransition"))
+ 	uint8 DitheredLODTransition : 1;
+diff --git a/Engine/Source/Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h b/Engine/Source/Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h
+index a02d0884c474..95df16520c90 100644
+--- a/Engine/Source/Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h
++++ b/Engine/Source/Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h
+@@ -211,6 +211,9 @@ class UMaterialInstanceDynamic : public UMaterialInstance
+ 	ENGINE_API virtual EBlendMode GetBlendMode() const override;
+ 	ENGINE_API virtual bool IsTwoSided() const override;
+ 	ENGINE_API virtual bool IsThinSurface() const override;
++	// RDTG
++	ENGINE_API virtual bool HasRetroreflections() const override;
++	
+ 	ENGINE_API virtual bool IsTranslucencyWritingVelocity() const override;
+ 	ENGINE_API virtual bool IsDitheredLODTransition() const override;
+ 	ENGINE_API virtual bool IsMasked() const override;
+diff --git a/Engine/Source/Runtime/Engine/Public/Materials/MaterialInterface.h b/Engine/Source/Runtime/Engine/Public/Materials/MaterialInterface.h
+index c009b5038611..d6c90ff1614d 100644
+--- a/Engine/Source/Runtime/Engine/Public/Materials/MaterialInterface.h
++++ b/Engine/Source/Runtime/Engine/Public/Materials/MaterialInterface.h
+@@ -982,6 +982,8 @@ public:
+ 	ENGINE_API virtual bool IsShadingModelFromMaterialExpression() const;
+ 	ENGINE_API virtual bool IsTwoSided() const;
+ 	ENGINE_API virtual bool IsThinSurface() const;
++	// RDTG
++	ENGINE_API virtual bool HasRetroreflections() const;
+ 	ENGINE_API virtual bool IsDitheredLODTransition() const;
+ 	ENGINE_API virtual bool IsTranslucencyWritingCustomDepth() const;
+ 	ENGINE_API virtual bool IsTranslucencyWritingVelocity() const;
+diff --git a/Engine/Source/Runtime/Engine/Public/Materials/MaterialRelevance.h b/Engine/Source/Runtime/Engine/Public/Materials/MaterialRelevance.h
+index e22d6b423069..b5f1b7d8afeb 100644
+--- a/Engine/Source/Runtime/Engine/Public/Materials/MaterialRelevance.h
++++ b/Engine/Source/Runtime/Engine/Public/Materials/MaterialRelevance.h
+@@ -49,6 +49,8 @@ struct FMaterialRelevance
+ 			uint8 bUsesAnisotropy : 1;
+ 			uint8 bIsLightFunctionAtlasCompatible : 1;
+ 			uint8 bSupportsMaterialCache : 1;
++			// RDTG
++			uint8 bHasRetroreflection : 1;
+ 		};
+ 		uint64 Raw;
+ 	};
+diff --git a/Engine/Source/Runtime/Engine/Public/Rendering/SubstrateMaterialShared.h b/Engine/Source/Runtime/Engine/Public/Rendering/SubstrateMaterialShared.h
+index 86d734b25b79..bc91423e86aa 100644
+--- a/Engine/Source/Runtime/Engine/Public/Rendering/SubstrateMaterialShared.h
++++ b/Engine/Source/Runtime/Engine/Public/Rendering/SubstrateMaterialShared.h
+@@ -183,6 +183,10 @@ public:
+ 
+ 	/** Indicate that the material is considered a thin surface instead of a volume filled up with matter */
+ 	LAYOUT_FIELD_EDITORONLY(uint8, bIsThin);
++
++	// RDTG
++	LAYOUT_FIELD_EDITORONLY(uint8, bHasRetroreflections);
++	
+ 	/** Indicate the final material type */
+ 	LAYOUT_FIELD_EDITORONLY(uint8, MaterialType);
+ 
+diff --git a/Engine/Source/Runtime/Engine/Public/SceneTypes.h b/Engine/Source/Runtime/Engine/Public/SceneTypes.h
+index f6763e03768b..3965d858aa0e 100644
+--- a/Engine/Source/Runtime/Engine/Public/SceneTypes.h
++++ b/Engine/Source/Runtime/Engine/Public/SceneTypes.h
+@@ -164,6 +164,8 @@ enum EMaterialProperty : int
+ 	MP_SubsurfaceColor UMETA(DisplayName = "Subsurface"),
+ 	MP_CustomData0 UMETA(Hidden),
+ 	MP_CustomData1 UMETA(Hidden),
++	// RDTG
++	MP_CustomData2 UMETA(Hidden),
+ 	MP_AmbientOcclusion UMETA(DisplayName = "Ambient Occlusion"),
+ 	MP_Refraction UMETA(DisplayName = "Refraction"),
+ 	MP_CustomizedUVs0 UMETA(Hidden),
+diff --git a/Engine/Source/Runtime/RenderCore/Private/ShaderMaterialDerivedHelpers.cpp b/Engine/Source/Runtime/RenderCore/Private/ShaderMaterialDerivedHelpers.cpp
+index 2cbcb846d66a..43576d1bb7d7 100644
+--- a/Engine/Source/Runtime/RenderCore/Private/ShaderMaterialDerivedHelpers.cpp
++++ b/Engine/Source/Runtime/RenderCore/Private/ShaderMaterialDerivedHelpers.cpp
+@@ -46,7 +46,8 @@ FShaderMaterialDerivedDefines RENDERCORE_API CalculateDerivedMaterialParameters(
+ 	Dst.USES_GBUFFER = (FEATURE_LEVEL >= ERHIFeatureLevel::SM4_REMOVED && (Mat.MATERIALBLENDING_SOLID || Mat.MATERIALBLENDING_MASKED) && !SrcGlobal.FORWARD_SHADING);
+ 
+ 	// Only some shader models actually need custom data.
+-	Dst.WRITES_CUSTOMDATA_TO_GBUFFER = (Dst.USES_GBUFFER && (Mat.MATERIAL_SHADINGMODEL_SUBSURFACE || Mat.MATERIAL_SHADINGMODEL_PREINTEGRATED_SKIN || Mat.MATERIAL_SHADINGMODEL_SUBSURFACE_PROFILE || Mat.MATERIAL_SHADINGMODEL_CLEAR_COAT || Mat.MATERIAL_SHADINGMODEL_TWOSIDED_FOLIAGE || Mat.MATERIAL_SHADINGMODEL_HAIR || Mat.MATERIAL_SHADINGMODEL_CLOTH || Mat.MATERIAL_SHADINGMODEL_EYE));
++	// RDTG
++	Dst.WRITES_CUSTOMDATA_TO_GBUFFER = (Dst.USES_GBUFFER && (Mat.MATERIAL_SHADINGMODEL_SUBSURFACE || Mat.MATERIAL_SHADINGMODEL_PREINTEGRATED_SKIN || Mat.MATERIAL_SHADINGMODEL_SUBSURFACE_PROFILE || Mat.MATERIAL_SHADINGMODEL_CLEAR_COAT || Mat.MATERIAL_SHADINGMODEL_TWOSIDED_FOLIAGE || Mat.MATERIAL_SHADINGMODEL_HAIR || Mat.MATERIAL_SHADINGMODEL_CLOTH || Mat.MATERIAL_SHADINGMODEL_EYE || Mat.MATERIAL_SHADINGMODEL_RETROREFLECTIVE));
+ 
+ 	// Based on GetPrecomputedShadowMasks()
+ 	// Note: WRITES_PRECSHADOWFACTOR_TO_GBUFFER is currently disabled because we use the precomputed shadow factor GBuffer outside of STATICLIGHTING_TEXTUREMASK to store UseSingleSampleShadowFromStationaryLights
+diff --git a/Engine/Source/Runtime/RenderCore/Public/GBufferInfo.h b/Engine/Source/Runtime/RenderCore/Public/GBufferInfo.h
+index c536ff61eaa0..2f97008b47b5 100644
+--- a/Engine/Source/Runtime/RenderCore/Public/GBufferInfo.h
++++ b/Engine/Source/Runtime/RenderCore/Public/GBufferInfo.h
+@@ -34,6 +34,9 @@ enum EGBufferSlot
+ 	GBS_SubsurfaceProfile, //RGB8
+ 	GBS_ClearCoat, // R8
+ 	GBS_ClearCoatRoughness, // R8
++	// RDTG
++	// CustomData2
++	GBS_RetroreflectionIntensity, // R8
+ 	GBS_HairSecondaryWorldNormal, // RG8
+ 	GBS_HairBacklit, // R8
+ 	GBS_Cloth, // R8
+diff --git a/Engine/Source/Runtime/RenderCore/Public/ShaderMaterial.h b/Engine/Source/Runtime/RenderCore/Public/ShaderMaterial.h
+index 3b90c1e7e043..c79323ee1e79 100644
+--- a/Engine/Source/Runtime/RenderCore/Public/ShaderMaterial.h
++++ b/Engine/Source/Runtime/RenderCore/Public/ShaderMaterial.h
+@@ -108,6 +108,9 @@ struct FShaderMaterialPropertyDefines
+ 	uint8 SINGLE_LAYER_WATER_SEPARATED_MAIN_LIGHT : 1;
+ 	uint8 MATERIAL_SHADINGMODEL_THIN_TRANSLUCENT : 1;
+ 
++	// RDTG
++	uint8 MATERIAL_SHADINGMODEL_RETROREFLECTIVE : 1;
++	
+ 	uint8 TRANSLUCENCY_LIGHTING_VOLUMETRIC_NONDIRECTIONAL : 1;
+ 	uint8 TRANSLUCENCY_LIGHTING_VOLUMETRIC_DIRECTIONAL : 1;
+ 	uint8 TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_NONDIRECTIONAL : 1;
+@@ -143,6 +146,8 @@ struct FShaderMaterialPropertyDefines
+ 	uint8 USE_DITHERED_LOD_TRANSITION_FROM_MATERIAL : 1;
+ 	uint8 MATERIAL_TWOSIDED : 1;
+ 	uint8 MATERIAL_ISTHINSURFACE : 1;
++	// RDTG
++	uint8 MATERIAL_HAS_RETROREFLECTIONS : 1;
+ 	uint8 MATERIAL_TANGENTSPACENORMAL : 1;
+ 	uint8 GENERATE_SPHERICAL_PARTICLE_NORMALS : 1;
+ 	uint8 MATERIAL_USE_PREINTEGRATED_GF : 1;
+diff --git a/Engine/Source/Runtime/Renderer/Private/AnisotropyRendering.cpp b/Engine/Source/Runtime/Renderer/Private/AnisotropyRendering.cpp
+index 41a3c9d6a603..70568fa805fa 100644
+--- a/Engine/Source/Runtime/Renderer/Private/AnisotropyRendering.cpp
++++ b/Engine/Source/Runtime/Renderer/Private/AnisotropyRendering.cpp
+@@ -33,7 +33,8 @@ static bool IsAnisotropyPassCompatible(const EShaderPlatform Platform, FMaterial
+ 		!Substrate::IsSubstrateEnabled() && // Substrate renders anisotropy surface natively, without extra pass.
+ 		MaterialParameters.bHasAnisotropyConnected &&
+ 		!IsTranslucentBlendMode(MaterialParameters) &&
+-		MaterialParameters.ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat });
++		// RDTG
++		MaterialParameters.ShadingModels.HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat, MSM_Retroreflective });
+ }
+ 
+ class FAnisotropyVS : public FMeshMaterialShader
+@@ -138,7 +139,8 @@ bool GetAnisotropyPassShaders(
+ static bool ShouldDraw(const FMaterial& Material, bool bMaterialUsesAnisotropy)
+ {
+ 	const bool bIsNotTranslucent = IsOpaqueOrMaskedBlendMode(Material);
+-	return (bMaterialUsesAnisotropy && bIsNotTranslucent && Material.GetShadingModels().HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat }));
++	// RDTG
++	return (bMaterialUsesAnisotropy && bIsNotTranslucent && Material.GetShadingModels().HasAnyShadingModel({ MSM_DefaultLit, MSM_ClearCoat, MSM_Retroreflective }));
+ }
+ 
+ void FAnisotropyMeshProcessor::AddMeshBatch(
+diff --git a/Engine/Source/Runtime/Renderer/Private/PrimitiveSceneInfo.cpp b/Engine/Source/Runtime/Renderer/Private/PrimitiveSceneInfo.cpp
+index 1b3482c02e36..265b6e8545df 100644
+--- a/Engine/Source/Runtime/Renderer/Private/PrimitiveSceneInfo.cpp
++++ b/Engine/Source/Runtime/Renderer/Private/PrimitiveSceneInfo.cpp
+@@ -133,7 +133,8 @@ public:
+ 			const FMaterial& Material = Mesh.MaterialRenderProxy->GetIncompleteMaterialWithFallback(FeatureLevel);
+ 			bool bUseSkyMaterial = Material.IsSky();
+ 			bool bUseSingleLayerWaterMaterial = Material.GetShadingModels().HasShadingModel(MSM_SingleLayerWater);
+-			bool bUseAnisotropy = Material.GetShadingModels().HasAnyShadingModel({MSM_DefaultLit, MSM_ClearCoat}) && Material.MaterialUsesAnisotropy_RenderThread();
++			// RDTG
++			bool bUseAnisotropy = Material.GetShadingModels().HasAnyShadingModel({MSM_DefaultLit, MSM_ClearCoat, MSM_Retroreflective}) && Material.MaterialUsesAnisotropy_RenderThread();
+ 			bool bSupportsNaniteRendering = SupportsNaniteRendering(StaticMesh->VertexFactory, PrimitiveSceneProxy, Mesh.MaterialRenderProxy, FeatureLevel);
+ 			bool bSupportsGPUScene = StaticMesh->VertexFactory->SupportsGPUScene(FeatureLevel);
+ 			bool bUseForWaterInfoTextureDepth = Mesh.bUseForWaterInfoTextureDepth;
