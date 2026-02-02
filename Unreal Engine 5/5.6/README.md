@@ -1,0 +1,1 @@
+This is currently just a test patch. I am still working on porting the shading model to Unreal Engine 5.6, after which I am going to test port it over to 5.7. I am unsure if I will continue after this, due to the upcoming changes with Strata.
